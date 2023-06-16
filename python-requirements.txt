@@ -1,3 +1,4 @@
 pyyaml
 pydantic
 watchdog
+pytest
