@@ -1,7 +1,10 @@
 import shutil
 from pathlib import Path
 
-from spiderweb import SnippetRepository, ROOT_FOLDER, run_and_check, run_and_capture_output
+from spiderweb.markdown_parser import MarkdownParser, TokenType, ShowCommand, UpdateCommand
+from spiderweb.snippet import SnippetRepository
+from spiderweb.env import ROOT_FOLDER
+from spiderweb.shell_utils import run_and_check, run_and_capture_output
 
 
 def render_markdown():
@@ -10,35 +13,37 @@ def render_markdown():
     output = ROOT_FOLDER / "generated-site" / "content" / "_index.md"
 
     text = content.read_text()
-    parts = text.split("{{")
-    out = ""
-    for part in parts:
-        # Handle commands
-        if part.startswith("-update"):
-            part_split_by_newline = part.split("\n")
-            snippet_name = part_split_by_newline[0].split(" ")[1]
-            print(f'Updating snippet name {snippet_name}')
-            # Scan until the closing brace
-            remaining_text = "\n".join(part_split_by_newline)[1:]
-            new_text = remaining_text.split("}}>>")[0]
-            print(f'new text: {new_text}')
+    parser = MarkdownParser(text)
+    output_text = ""
+    while True:
+        tokens_before_command = parser.read_tokens_until_command_begins()
+        output_text += "".join((t.value for t in tokens_before_command))
 
-        if "}}" in part:
-            splits = part.split("}}")
-            snippet_name = splits[0]
+        if parser.lexer.peek().type == TokenType.EOF:
+            break
+
+        command = parser.parse_command()
+        print(f'Got command {command}')
+        if isinstance(command, ShowCommand):
             # Treat this as an embedded snippet
-            embedded_snippet = repo.get(snippet_name)
-            out += f"```{embedded_snippet.header.lang.value}\n"
-            out += repo.render_snippet(embedded_snippet)[0].text
-            out += f"```"
+            snippet = repo.get(command.snippet_name)
+            output_text += f"```{snippet.header.lang.value}\n"
+            output_text += repo.render_snippet(snippet)[0].text
+            output_text += f"\n```\n"
+        elif isinstance(command, UpdateCommand):
+            # Update the snippet contents
+            snippet = repo.get(command.snippet_name)
+            print(f'Updating `{snippet}`...')
+            snippet.text = command.update_data
+            # Also show it
+            output_text += f"_{snippet.header.file}_\n"
+            output_text += f"```{snippet.header.lang.value}\n"
+            output_text += repo.render_snippet(snippet)[0].text
+            output_text += f"```\n"
+        else:
+            raise NotImplementedError(f"Unhandled command type {type(command)}")
 
-            # Output whatever comes next
-            part = splits[1]
-
-        # Output the non-templated text
-        out += part
-
-    output.write_text(out)
+    output.write_text(output_text)
 
 
 def render_program(name: str) -> Path:

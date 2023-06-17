@@ -116,8 +116,8 @@ class SnippetRepository:
                     # Treat this as an embedded snippet
                     embedded_snippet_render_description = self.get(embedded_command_or_snippet_name)
                     # Ensure embedded snippets don't specify an output path
-                    if embedded_snippet_render_description.header.file:
-                        raise ValueError(f"Did not expect an embedded snippet to want to be rendered to a specific path, but specified {embedded_snippet_render_description.header.file}")
+                    #if embedded_snippet_render_description.header.file:
+                    #    raise ValueError(f"Did not expect an embedded snippet to want to be rendered to a specific path, but specified {embedded_snippet_render_description.header.file}")
                     this_snippet_text += self.render_snippet(embedded_snippet_render_description)[0].text
 
                 # Output whatever comes next

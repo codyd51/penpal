@@ -21,7 +21,7 @@ If you strip away our DNS resolver to the bare bones, its core runloop will be c
 
 To get us started, let's _wait_ for DNS queries to come in.
 
-{{listing1}}
+{{show listing1}}
 
 When we try to run this, the operating system rejects our request:
 
@@ -40,7 +40,7 @@ We're also not quite ready to handle all of our system's "real" DNS traffic, any
 
 Instead, while we're building things out, let's leave our system's DNS configuration alone, and build our server off to the side. We'll send ourselves controlled test packets to ensure everything is working as expected, without needing to worry about all the complexities of real-world traffic upfront. 
 
-{{listing2}}
+{{show listing2}}
 
 ```shell
 $ cargo run dns_resolver
@@ -182,15 +182,14 @@ For all C's warts, this _is_ quite a nice and tidy way to describe a bit-field. 
 
 To get started, let's add `bitvec` to our crate's dependencies.
 
-```toml
-[dependencies]
-bitvec = "1"
-```
+{{show dependencies}}
 
 Now, let's start modeling the DNS header format! Make a new file, `packet_header_layout.rs`.
 
+{{update main_imports
+use std::net::UdpSocket;
 
-{{listing3}}
+use packet_header_layout;
+}}
 
-
-
+{{show listing3}}

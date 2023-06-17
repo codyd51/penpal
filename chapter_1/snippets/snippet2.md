@@ -1,4 +1,5 @@
 lang: rust
+file: src/main.rs
 ###
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");

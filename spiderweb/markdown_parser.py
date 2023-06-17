@@ -128,11 +128,13 @@ class TestLexer:
 
 class CommandType(Enum):
     UpdateSnippet = 0,
+    ShowSnippet = 1,
 
     @classmethod
     def from_str(cls, s: str) -> Self:
         return {
             "update": CommandType.UpdateSnippet,
+            "show": CommandType.ShowSnippet,
         }[s]
 
 
@@ -147,7 +149,14 @@ class UpdateCommand(Command):
     update_data: str
 
 
+@dataclass
+class ShowCommand(Command):
+    snippet_name: str
+
+
 class MarkdownParser:
+    BEGIN_COMMAND_SEQ = [TokenType.LeftBrace, TokenType.LeftBrace]
+    END_COMMAND_SEQ = [TokenType.RightBrace, TokenType.RightBrace]
     def __init__(self, text: str) -> None:
         self.text = self
         self.lexer = Lexer(text)
@@ -182,16 +191,24 @@ class MarkdownParser:
                 break
         return tokens
 
+    def read_tokens_until_command_begins(self) -> list[Token]:
+        return self.read_tokens_until_sequence(self.BEGIN_COMMAND_SEQ)
+
+    def read_tokens_until_command_ends(self) -> list[Token]:
+        return self.read_tokens_until_sequence(self.END_COMMAND_SEQ)
+
     def expect(self, token_type: TokenType) -> Token:
         next_tok = self.lexer.next()
         if next_tok.type != token_type:
             raise RuntimeError(f"Expected {token_type}, but found {next_tok}")
         return next_tok
 
+    def expect_seq(self, token_types: list[TokenType]) -> list[Token]:
+        return [self.expect(tok_type) for tok_type in token_types]
+
     def parse_command(self) -> Command:
         # Expect two braces
-        self.expect(TokenType.LeftBrace)
-        self.expect(TokenType.LeftBrace)
+        self.expect_seq(MarkdownParser.BEGIN_COMMAND_SEQ)
         # Command name
         command_name = self.expect(TokenType.Word)
         command_type = CommandType.from_str(command_name.value)
@@ -201,14 +218,23 @@ class MarkdownParser:
             snippet_name = self.expect(TokenType.Word)
             self.expect(TokenType.Newline)
             update_data = self.read_tokens_until_sequence([TokenType.RightBrace, TokenType.RightBrace])
-            self.expect(TokenType.RightBrace)
-            self.expect(TokenType.RightBrace)
+            self.expect_seq(MarkdownParser.END_COMMAND_SEQ)
             print(f'snippet name {snippet_name} {update_data}')
 
             return UpdateCommand(
                 type=CommandType.UpdateSnippet,
                 snippet_name=snippet_name.value,
                 update_data="".join([t.value for t in update_data])
+            )
+        elif command_type == CommandType.ShowSnippet:
+            self.expect(TokenType.Space)
+            snippet_name = self.expect(TokenType.Word)
+            self.expect_seq(MarkdownParser.END_COMMAND_SEQ)
+            print(f'snippet name {snippet_name}')
+
+            return ShowCommand(
+                type=CommandType.ShowSnippet,
+                snippet_name=snippet_name.value,
             )
         else:
             raise NotImplementedError(command_type)
