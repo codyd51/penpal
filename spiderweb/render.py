@@ -7,7 +7,6 @@ from spiderweb.markdown_parser import (
     TokenType,
     ShowCommand,
     UpdateCommand,
-    ExecuteProgram,
     DefineSnippet,
     Command,
     CommandType,
@@ -19,49 +18,9 @@ from spiderweb.env import ROOT_FOLDER
 from spiderweb.shell_utils import run_and_check, run_and_capture_output
 
 
-def render_markdown2():
-    repo = SnippetRepository()
-    content = ROOT_FOLDER / "content" / "index.md"
-    output = ROOT_FOLDER / "generated-site" / "content" / "_index.md"
-
-    text = content.read_text()
-    parser = MarkdownParser(text)
-    output_text = ""
-    while True:
-        tokens_before_command = parser.read_tokens_until_command_begins()
-        output_text += "".join((t.value for t in tokens_before_command))
-
-        if parser.lexer.peek().type == TokenType.EOF:
-            break
-
-        command = parser.parse_command()
-        print(f"Got command {command}")
-        if isinstance(command, ShowCommand):
-            # Treat this as an embedded snippet
-            snippet = repo.get(command.snippet_name)
-            output_text += f"```{snippet.header.lang.value}\n"
-            output_text += repo.render_snippet(snippet)[0].text
-            output_text += f"\n```\n"
-        elif isinstance(command, UpdateCommand):
-            # Update the snippet contents
-            snippet = repo.get(command.snippet_name)
-            print(f"Updating `{snippet}`...")
-            snippet.text = command.update_data
-            # Also show it
-            output_text += f"_{snippet.header.file}_\n"
-            output_text += f"```{snippet.header.lang.value}\n"
-            output_text += repo.render_snippet(snippet)[0].text
-            output_text += f"```\n"
-        elif isinstance(command, ExecuteProgram):
-            raise NotImplementedError()
-            render_in_memory_program()
-        elif isinstance(command, DefineSnippet):
-            pass
-        else:
-            raise NotImplementedError(f"Unhandled command type {type(command)}")
-
-    output.write_text(output_text)
-
+SnippetName = str
+ProductionRuleIndex = int
+StringIndex = int
 
 @dataclass
 class TextSection:
@@ -76,27 +35,11 @@ class CommandSection:
 DocumentSection = TextSection | CommandSection
 
 
-def parse_next_command(parser: MarkdownParser) -> (TextSection | None, CommandSection | None):
-    text_section = None
-    tokens_before_command = parser.read_tokens_until_command_begins()
-    # We may immediately start with a command
-    if len(tokens_before_command):
-        text_before_command = "".join(t.value for t in tokens_before_command)
-        text_section = TextSection(text_before_command)
-
-    if parser.lexer.peek().type == TokenType.EOF:
-        return text_section, None
-
-    command = parser.parse_command()
-    match command:
-        case DefineSnippet(type, header, snippet_name, content):
-            # We'll need to scan forwards to gather any snippets that are referenced here, but are not defined yet
-            # start_cursor = parser.lexer.cursor
-            # _, next_command = parse_next_command(parser)
-            # parser.lexerr.cursor = start_cursor
-            pass
-        case _:
-            raise NotImplementedError(command)
+@dataclass
+class InlineSnippet:
+    header: SnippetHeader
+    name: SnippetName
+    production_rules: list[SnippetProductionRule]
 
 
 def parse_document_text(text: str) -> list[DocumentSection]:
@@ -115,32 +58,6 @@ def parse_document_text(text: str) -> list[DocumentSection]:
         output_sections.append(CommandSection(parser.parse_command()))
 
     return output_sections
-
-
-def parse_document() -> list[DocumentSection]:
-    repo = SnippetRepository()
-    content = ROOT_FOLDER / "content" / "index.md"
-    output = ROOT_FOLDER / "generated-site" / "content" / "_index.md"
-
-    text = content.read_text()
-    sections = parse_document_text(text)
-    # output.write_text(output_text)
-    # raise NotImplementedError(sections)
-    return sections
-
-
-SnippetName = str
-
-
-@dataclass
-class InlineSnippet:
-    header: SnippetHeader
-    name: SnippetName
-    production_rules: list[SnippetProductionRule]
-
-
-ProductionRuleIndex = int
-StringIndex = int
 
 
 def render_snippet(defined_snippets: dict[SnippetName, InlineSnippet], snippet: InlineSnippet, is_nested: bool, highlight_snippet_idx: int | None) -> (str, dict[ProductionRuleIndex, StringIndex]):
@@ -287,52 +204,6 @@ def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, emb
         if isinstance(production_rule, EmbedSnippet) and production_rule.snippet_name == embedded_snippet_name:
             return i
     raise ValueError(f'Failed to find an embedding for {embedded_snippet_name} within {parent_snippet.name}')
-
-
-def render_markdown(text: str) -> list[DocumentSection]:
-    parser = MarkdownParser(text)
-    output_text = ""
-    while True:
-        tokens_before_command = parser.read_tokens_until_command_begins()
-        output_text += "".join((t.value for t in tokens_before_command))
-
-        if parser.lexer.peek().type == TokenType.EOF:
-            break
-
-        command = parser.parse_command()
-        print(f"Got command {command}")
-        if isinstance(command, ShowCommand):
-            # Treat this as an embedded snippet
-            snippet = repo.get(command.snippet_name)
-            output_text += f"```{snippet.header.lang.value}\n"
-            output_text += repo.render_snippet(snippet)[0].text
-            output_text += f"\n```\n"
-        elif isinstance(command, UpdateCommand):
-            # Update the snippet contents
-            snippet = repo.get(command.snippet_name)
-            print(f"Updating `{snippet}`...")
-            snippet.text = command.update_data
-            # Also show it
-            output_text += f"_{snippet.header.file}_\n"
-            output_text += f"```{snippet.header.lang.value}\n"
-            output_text += repo.render_snippet(snippet)[0].text
-            output_text += f"```\n"
-        elif isinstance(command, ExecuteProgram):
-            raise NotImplementedError()
-            render_in_memory_program()
-        elif isinstance(command, DefineSnippet):
-            # We'll need to scan forwards to gather any snippets that are referenced here, but are not defined yet
-            start_cursor = parser.lexer.cursor
-
-            pass
-        else:
-            raise NotImplementedError(f"Unhandled command type {type(command)}")
-
-    output.write_text(output_text)
-
-
-def render_in_memory_program():
-    repo = SnippetRepository()
 
 
 def render_program(name: str) -> Path:

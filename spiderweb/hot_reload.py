@@ -3,7 +3,7 @@ import time
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from spiderweb import render_markdown, render_programs
+from spiderweb import render_programs
 from spiderweb.env import CONTENT_ROOT, CHAPTER_1_ROOT
 
 
@@ -12,7 +12,8 @@ class EventHandler(FileSystemEventHandler):
         # print(event)
         print(f'Rendering markdown in response to {event}...')
         try:
-            render_markdown()
+            raise NotImplementedError()
+            # render_markdown()
             render_programs()
         except Exception as e:
             print(f'Failed to render to markdown: {e}')
