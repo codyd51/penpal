@@ -22,10 +22,10 @@ SnippetProductionRule = EmbedSnippet | EmbedText
 
 
 class CommandType(Enum):
-    UpdateSnippet = (0,)
-    ShowSnippet = (1,)
-    ExecuteProgram = (2,)
-    DefineSnippet = (3,)
+    UpdateSnippet = 0
+    ShowSnippet = 1
+    ExecuteProgram = 2
+    DefineSnippet = 3
 
     @classmethod
     def from_str(cls, s: str) -> Self:
@@ -39,26 +39,22 @@ class CommandType(Enum):
 
 @dataclass
 class UpdateCommand:
-    type: CommandType
     snippet_name: str
     update_data: str
 
 
 @dataclass
 class ShowCommand:
-    type: CommandType
     snippet_name: str
 
 
 @dataclass
 class ExecuteProgram:
-    type: CommandType
+    pass
 
 
 @dataclass
 class DefineSnippet:
-    type: CommandType
-    # TODO(PT): Replace with InlineSnippet
     header: SnippetHeader
     snippet_name: str
     content: list[SnippetProductionRule]
@@ -70,6 +66,7 @@ Command = UpdateCommand | ShowCommand | ExecuteProgram | DefineSnippet
 class MarkdownParser:
     BEGIN_COMMAND_SEQ = [TokenType.LeftBrace, TokenType.LeftBrace]
     END_COMMAND_SEQ = [TokenType.RightBrace, TokenType.RightBrace]
+    END_MULTI_LINE_COMMAND_SEQ = [TokenType.Newline, *END_COMMAND_SEQ]
 
     def __init__(self, text: str) -> None:
         self.text = self
@@ -112,49 +109,26 @@ class MarkdownParser:
     def read_tokens_until_command_begins(self) -> list[Token]:
         return self.read_tokens_until_sequence(self.BEGIN_COMMAND_SEQ)
 
-    def read_tokens_until_command_ends(self) -> list[Token]:
-        out = []
-        # Handle nested commands
-        while True:
-            tokens_before_nested_command = self.read_tokens_until_any_sequence(
-                [self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ]
-            )
-            print("".join(t.value for t in tokens_before_nested_command))
-            # What's next?
-            peek = self.lexer.peek()
-            # A double-peek would be nice to be totally sure of our state
-            if peek.type == TokenType.LeftBrace:
-                print(f"Found a nested command!")
-            elif peek.type == TokenType.RightBrace:
-                print(f"Found the end of a command")
-            else:
-                raise ValueError(f"Unexpected token type {peek.type}")
-            return
-
     def parse_snippet_production_rules(self) -> list[SnippetProductionRule]:
         out = []
         while True:
             # Handle nested commands
-            end_command_seq = [TokenType.Newline, *self.END_COMMAND_SEQ]
-            print(end_command_seq)
             tokens_before_nested_command = self.read_tokens_until_any_sequence(
-                [self.BEGIN_COMMAND_SEQ, end_command_seq]
+                [self.BEGIN_COMMAND_SEQ, self.END_MULTI_LINE_COMMAND_SEQ]
             )
-            # We might immediately have an embed-snippet rule
+            # We might immediately have an embed-snippet rule, so it's not a guarantee that there will be text before
+            # the first command.
             if len(tokens_before_nested_command):
                 text_before_nested_command = "".join(t.value for t in tokens_before_nested_command)
                 out.append(EmbedText(text_before_nested_command))
 
             # What's next?
             if self.lexer.peek_next_token_types_match(self.BEGIN_COMMAND_SEQ):
-                print(f"Found a nested snippet!")
                 self.match_command_open()
                 embedded_snippet_name = self.match_word()
-                print(embedded_snippet_name)
                 self.match_command_close()
                 out.append(EmbedSnippet(embedded_snippet_name))
-            elif self.lexer.peek_next_token_types_match(end_command_seq):
-                print(f"Found the end of a command")
+            elif self.lexer.peek_next_token_types_match(self.END_MULTI_LINE_COMMAND_SEQ):
                 self.expect(TokenType.Newline)
                 self.match_command_close()
                 break
@@ -192,6 +166,56 @@ class MarkdownParser:
     def match_word(self) -> str:
         return self.expect(TokenType.Word).value
 
+    def parse_command__update(self) -> UpdateCommand:
+        self.expect(TokenType.Space)
+        snippet_name = self.expect(TokenType.Word)
+        self.expect(TokenType.Newline)
+        update_data = self.read_tokens_until_sequence(self.END_COMMAND_SEQ)
+        self.match_command_close()
+        print(f"snippet name {snippet_name} {update_data}")
+
+        return UpdateCommand(
+            snippet_name=snippet_name.value,
+            update_data="".join([t.value for t in update_data]),
+        )
+
+    def parse_command__show(self) -> ShowCommand:
+        self.expect(TokenType.Space)
+        snippet_name = self.expect(TokenType.Word)
+        self.match_command_close()
+        print(f"snippet name {snippet_name}")
+
+        return ShowCommand(snippet_name=snippet_name.value)
+
+    def parse_command__execute(self) -> ExecuteProgram:
+        self.match_command_close()
+        return ExecuteProgram()
+
+    def parse_command__define(self) -> DefineSnippet:
+        self.expect(TokenType.Space)
+        snippet_name = self.read_str_until(TokenType.Newline)
+        separate_head_from_content = [TokenType.Hash, TokenType.Hash, TokenType.Hash]
+        terminate_shorthand_definition = [TokenType.Newline, TokenType.RightBrace, TokenType.RightBrace]
+        header_str = self.read_str_until_any_seq([separate_head_from_content, terminate_shorthand_definition])
+        header_dict = yaml.load(header_str, Loader=yaml.SafeLoader)
+        header = SnippetHeader.parse_obj(header_dict)
+        if self.lexer.peek_next_token_types_match(terminate_shorthand_definition):
+            self.expect_seq([*terminate_shorthand_definition, TokenType.Newline])
+            # Shorthand empty definition
+            return DefineSnippet(
+                snippet_name=snippet_name,
+                header=header,
+                content=[]
+            )
+        else:
+            self.expect_seq([*separate_head_from_content, TokenType.Newline])
+            content = self.parse_snippet_production_rules()
+            return DefineSnippet(
+                snippet_name=snippet_name,
+                header=header,
+                content=content,
+            )
+
     def parse_command(self) -> Command:
         # Expect two braces
         self.match_command_open()
@@ -200,57 +224,13 @@ class MarkdownParser:
         command_type = CommandType.from_str(command_name.value)
         print(f"Found command name {command_name.value} of type {command_type}")
         if command_type == CommandType.UpdateSnippet:
-            self.expect(TokenType.Space)
-            snippet_name = self.expect(TokenType.Word)
-            self.expect(TokenType.Newline)
-            update_data = self.read_tokens_until_sequence(self.END_COMMAND_SEQ)
-            self.match_command_close()
-            print(f"snippet name {snippet_name} {update_data}")
-
-            return UpdateCommand(
-                type=CommandType.UpdateSnippet,
-                snippet_name=snippet_name.value,
-                update_data="".join([t.value for t in update_data]),
-            )
+            return self.parse_command__update()
         elif command_type == CommandType.ShowSnippet:
-            self.expect(TokenType.Space)
-            snippet_name = self.expect(TokenType.Word)
-            self.match_command_close()
-            print(f"snippet name {snippet_name}")
-
-            return ShowCommand(
-                type=CommandType.ShowSnippet,
-                snippet_name=snippet_name.value,
-            )
+            return self.parse_command__show()
         elif command_type == CommandType.ExecuteProgram:
-            self.match_command_close()
-            return ExecuteProgram(type=CommandType.ExecuteProgram)
+            return self.parse_command__execute()
         elif command_type == CommandType.DefineSnippet:
-            self.expect(TokenType.Space)
-            snippet_name = self.read_str_until(TokenType.Newline)
-            separate_head_from_content = [TokenType.Hash, TokenType.Hash, TokenType.Hash]
-            terminate_shorthand_definition = [TokenType.Newline, TokenType.RightBrace, TokenType.RightBrace]
-            header_str = self.read_str_until_any_seq([separate_head_from_content, terminate_shorthand_definition])
-            header_dict = yaml.load(header_str, Loader=yaml.SafeLoader)
-            header = SnippetHeader.parse_obj(header_dict)
-            if self.lexer.peek_next_token_types_match(terminate_shorthand_definition):
-                self.expect_seq([*terminate_shorthand_definition, TokenType.Newline])
-                # Shorthand empty definition
-                return DefineSnippet(
-                    type=CommandType.DefineSnippet,
-                    snippet_name=snippet_name,
-                    header=header,
-                    content=[]
-                )
-            else:
-                self.expect_seq([*separate_head_from_content, TokenType.Newline])
-                content = self.parse_snippet_production_rules()
-                return DefineSnippet(
-                    type=CommandType.DefineSnippet,
-                    snippet_name=snippet_name,
-                    header=header,
-                    content=content,
-                )
+            return self.parse_command__define()
         else:
             raise NotImplementedError(command_type)
 
@@ -277,7 +257,6 @@ use packet_header_layout;
 
         command = parser.parse_command()
         assert command == UpdateCommand(
-            type=CommandType.UpdateSnippet,
             snippet_name="main_imports",
             update_data=("use std::net::UdpSocket;\n" "\n" "use packet_header_layout;\n"),
         )
@@ -312,7 +291,6 @@ fn main() {
 
         command = parser.parse_command()
         assert command == DefineSnippet(
-            type=CommandType.DefineSnippet,
             snippet_name="main_runloop",
             header=SnippetHeader(
                 lang=SnippetLanguage.RUST,
@@ -340,8 +318,7 @@ fn main() {
 
         println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
     }
-}
-"""
+}"""
                 ),
             ],
         )

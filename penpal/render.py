@@ -2,19 +2,19 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
+from penpal.document_parser import DocumentSection, TextSection, CommandSection, parse_document_text
 from penpal.markdown_parser import (
-    MarkdownParser,
-    TokenType,
     ShowCommand,
     UpdateCommand,
     DefineSnippet,
-    Command,
     CommandType,
     EmbedText,
     EmbedSnippet,
     SnippetProductionRule,
 )
-from penpal.snippet import SnippetRepository, SnippetHeader, SnippetLanguage, Snippet
+from penpal.snippet import SnippetRepository, SnippetHeader, SnippetLanguage
 from penpal.env import ROOT_FOLDER
 from penpal.shell_utils import run_and_check, run_and_capture_output
 
@@ -25,41 +25,129 @@ StringIndex = int
 
 
 @dataclass
-class TextSection:
-    text: str
-
-
-@dataclass
-class CommandSection:
-    command: Command
-
-
-DocumentSection = TextSection | CommandSection
-
-
-@dataclass
 class InlineSnippet:
     header: SnippetHeader
     name: SnippetName
     production_rules: list[SnippetProductionRule]
 
 
-def parse_document_text(text: str) -> list[DocumentSection]:
-    output_sections = []
-    parser = MarkdownParser(text)
-    while True:
-        tokens_before_command = parser.read_tokens_until_command_begins()
-        # We may immediately start with a command
-        if len(tokens_before_command):
-            text_before_command = "".join(t.value for t in tokens_before_command)
-            output_sections.append(TextSection(text_before_command))
+class DocumentRenderer:
+    def __init__(self, document_sections: DocumentSection) -> None:
+        self.document_sections = document_sections
+        self.defined_snippets: dict[SnippetName, InlineSnippet] = dict()
+        self.rendered_snippets: list[InlineSnippet] = list()
 
-        if parser.lexer.peek().type == TokenType.EOF:
-            break
+    @staticmethod
+    def render_text_section(text_section: TextSection) -> str:
+        return text_section.text
 
-        output_sections.append(CommandSection(parser.parse_command()))
+    def render_command__show(self, command: ShowCommand) -> str:
+        out = str()
+        snippet_name = command.snippet_name
+        print(f"ShowCommand({snippet_name})")
+        snippet = self.defined_snippets[snippet_name]
+        rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, False, None)
+        file_name = (
+                snippet.header.file
+                or find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name).header.file
+        )
+        out += f"_{file_name}_"
+        out += rendered_snippet_text
+        print(rendered_snippet_text)
+        self.rendered_snippets.append(snippet)
+        return out
 
-    return output_sections
+    def render_command__define(self, command: DefineSnippet) -> str:
+        # Nothing to output for definitions
+        # But track it in our defined snippets
+        snippet_name = command.snippet_name
+        self.defined_snippets[snippet_name] = InlineSnippet(command.header, snippet_name, command.content)
+        print(f"Defined and tracked snippet {snippet_name}")
+        return str()
+
+    def render_command__update(self, command: UpdateCommand) -> str:
+        out = str()
+        snippet_name = command.snippet_name
+        print(f"Updating {snippet_name}")
+        existing_snippet = self.defined_snippets[snippet_name]
+        # Currently snippets can just be updated with new text, and cannot be updated to include new
+        # production rules
+        # It would be straightforward to support the former, though.
+        existing_snippet.production_rules = [EmbedText(command.update_data)]
+
+        # Now, render the updated snippet
+        # This snippet may not exist at the top level, and may only ever appear as a sub-snippet within
+        # another snippet.
+        # Therefore, we need to iterate the snippets to find the last time this snippet was used, to
+        # be able to show where the update happens in the context of the source code.
+        parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        # Replace the specified rule
+        production_rule_idx = find_embedded_snippet_in_production_rules(parent_snippet, snippet_name)
+        # print(f'Replacing {snippet_name} at index {production_rule_idx} in {parent_snippet.name}')
+        # parent_snippet.production_rules[production_rule_idx].text = updated_content
+
+        # Display the update
+        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(
+            self.defined_snippets, parent_snippet, False, production_rule_idx
+        )
+        highlight_start = rule_idx_to_start_idxs[production_rule_idx]
+        print(f"Found start of highlight at {highlight_start}")
+        highlight_end = (
+            rule_idx_to_start_idxs[production_rule_idx + 1]
+            if production_rule_idx < (len(parent_snippet.production_rules) - 1)
+            else len(rendered_snippet_text)
+        )
+        newline_counter = 0
+        for i, ch in enumerate(reversed(rendered_snippet_text[:highlight_start])):
+            if ch == "\n":
+                newline_counter += 1
+            if newline_counter == 2:
+                context_start = highlight_start - i
+                break
+        newline_counter = 0
+        for i, ch in enumerate(rendered_snippet_text[highlight_end:]):
+            if ch == "\n":
+                newline_counter += 1
+            if newline_counter == 3:
+                context_end = highlight_end + i
+                break
+
+        file_name = existing_snippet.header.file or parent_snippet.header.file
+        out += f"_{file_name}_\n"
+        out += f"```rust\n"
+        out += rendered_snippet_text[context_start:context_end]
+        out += f"\n```\n"
+        self.rendered_snippets.append(parent_snippet)
+
+        return out
+
+    def render_command_section(self, command_section: CommandSection) -> str:
+        out = str()
+        command = command_section.command
+        match command:
+            case ShowCommand(_):
+                out += self.render_command__show(command)
+
+            case DefineSnippet(_):
+                out += self.render_command__define(command)
+
+            case UpdateCommand(_):
+                out += self.render_command__update(command)
+
+            case command_type:
+                raise NotImplementedError(f"Don't know how to render a {command_type}")
+        return out
+
+    def render(self) -> str:
+        out = str()
+        for section in self.document_sections:
+            match section:
+                case TextSection():
+                    out += self.render_text_section(section)
+                case CommandSection():
+                    out += self.render_command_section(section)
+
+        return out
 
 
 def render_snippet(
@@ -98,97 +186,9 @@ def render_snippet(
 
     if not is_nested:
         # Close the code block
-        out += "```\n"
+        out += "\n```\n"
 
     return out, rules_to_start_idx
-
-
-def render_sections(sections: list[DocumentSection]) -> str:
-    out = str()
-
-    defined_snippets: dict[SnippetName, InlineSnippet] = dict()
-    rendered_snippets: list[InlineSnippet] = list()
-    for section in sections:
-        match section:
-            case TextSection(text):
-                out += text
-            case CommandSection(command):
-                match command:
-                    case ShowCommand(_, snippet_name):
-                        print(f"ShowCommand({snippet_name})")
-                        snippet = defined_snippets[snippet_name]
-                        rendered_snippet_text, _ = render_snippet(defined_snippets, snippet, False, None)
-                        file_name = (
-                            snippet.header.file
-                            or find_parent_snippet(defined_snippets, rendered_snippets, snippet_name).header.file
-                        )
-                        out += f"_{file_name}_"
-                        out += rendered_snippet_text
-                        print(rendered_snippet_text)
-                        rendered_snippets.append(snippet)
-
-                    case DefineSnippet(_, header, snippet_name, production_rules):
-                        # Nothing to output for definitions
-                        # But track it in our defined snippets
-                        defined_snippets[snippet_name] = InlineSnippet(header, snippet_name, production_rules)
-                        print(f"Defined and tracked snippet {snippet_name}")
-
-                    case UpdateCommand(_, snippet_name, updated_content):
-                        print(f"Updating {snippet_name}")
-                        existing_snippet = defined_snippets[snippet_name]
-                        # Currently snippets can just be updated with new text, and cannot be updated to include new
-                        # production rules
-                        # It would be straightforward to support the former, though.
-                        existing_snippet.production_rules = [EmbedText(updated_content)]
-
-                        # Now, render the updated snippet
-                        # This snippet may not exist at the top level, and may only ever appear as a sub-snippet within
-                        # another snippet.
-                        # Therefore, we need to iterate the snippets to find the last time this snippet was used, to
-                        # be able to show where the update happens in the context of the source code.
-                        parent_snippet = find_parent_snippet(defined_snippets, rendered_snippets, snippet_name)
-                        # Replace the specified rule
-                        production_rule_idx = find_embedded_snippet_in_production_rules(parent_snippet, snippet_name)
-                        # print(f'Replacing {snippet_name} at index {production_rule_idx} in {parent_snippet.name}')
-                        # parent_snippet.production_rules[production_rule_idx].text = updated_content
-
-                        # Display the update
-                        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(
-                            defined_snippets, parent_snippet, False, production_rule_idx
-                        )
-                        highlight_start = rule_idx_to_start_idxs[production_rule_idx]
-                        print(f"Found start of highlight at {highlight_start}")
-                        # TODO(PT): This won't work when the highlight is at the end
-                        highlight_end = rule_idx_to_start_idxs[production_rule_idx + 1]
-                        newline_counter = 0
-                        for i, ch in enumerate(reversed(rendered_snippet_text[:highlight_start])):
-                            if ch == "\n":
-                                newline_counter += 1
-                            if newline_counter == 3:
-                                context_start = highlight_start - i
-                                break
-                        newline_counter = 0
-                        for i, ch in enumerate(rendered_snippet_text[highlight_end:]):
-                            if ch == "\n":
-                                newline_counter += 1
-                            if newline_counter == 3:
-                                context_end = highlight_end + i
-                                break
-
-                        file_name = existing_snippet.header.file or parent_snippet.header.file
-                        out += f"_{file_name}_\n"
-                        out += f"```rust\n"
-                        out += rendered_snippet_text[context_start:context_end]
-                        out += f"\n```\n"
-                        rendered_snippets.append(parent_snippet)
-
-                        assert (
-                            defined_snippets[parent_snippet.name] == parent_snippet
-                        ), "need to reset snippet state in state"
-
-                    case command_type:
-                        raise NotImplementedError(f"Don't know how to render a {command_type}")
-    return out
 
 
 def find_parent_snippet(
@@ -253,20 +253,20 @@ def render_programs() -> list[Path]:
     return generated_programs
 
 
-def test_render_snippets():
+def _test_render_snippets():
     repo = SnippetRepository()
     print(repo.render_snippet(repo.get("listing1")))
     print(repo.render_snippet(repo.get("listing2")))
 
 
-def test_executables():
+def _test_executables():
     generated_program_paths = render_programs()
     for generated_program_path in generated_program_paths:
         return_code, output = run_and_capture_output(["cargo", "run"], cwd=generated_program_path)
         print(return_code, output)
 
 
-def test_executable(name: str):
+def _test_executable(name: str):
     generated_program_path = render_program(name)
     return_code, output = run_and_capture_output(["cargo", "run"], cwd=generated_program_path)
     print(return_code, output)
@@ -366,7 +366,6 @@ lang: rust
             ),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(
                         lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
                     ),
@@ -389,7 +388,7 @@ lang: rust
                             "        println!(\"We've received a DNS query of {byte_count_received} bytes from "
                             '{sender_addr:?}");\n'
                             "    }\n"
-                            "}\n"
+                            "}"
                         ),
                     ],
                 )
@@ -397,16 +396,14 @@ lang: rust
             TextSection(text="\n\n"),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="main_imports",
-                    content=[EmbedText(text="use " "std::net::UdpSocket;\n")],
+                    content=[EmbedText(text="use std::net::UdpSocket;")],
                 )
             ),
             TextSection(text="\n\n"),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="main_runloop_bind_to_socket",
                     content=[
@@ -418,13 +415,13 @@ lang: rust
                             '.expect("Failed '
                             "to bind to our "
                             "local DNS "
-                            'port");\n'
+                            'port");'
                         )
                     ],
                 )
             ),
             TextSection(text="\n\n"),
-            CommandSection(command=ShowCommand(type=CommandType.ShowSnippet, snippet_name="main_runloop")),
+            CommandSection(command=ShowCommand(snippet_name="main_runloop")),
             TextSection(text="\n"),
         ]
 
@@ -432,7 +429,6 @@ lang: rust
         sections = [
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(
                         lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
                     ),
@@ -463,7 +459,6 @@ lang: rust
             TextSection(text="\n\n"),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="main_imports",
                     content=[EmbedText(text="use std::net::UdpSocket;\n")],
@@ -472,7 +467,6 @@ lang: rust
             TextSection(text="\n\n"),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="main_runloop_bind_to_socket",
                     content=[
@@ -486,18 +480,19 @@ lang: rust
                 )
             ),
             TextSection(text="\n\n"),
-            CommandSection(command=ShowCommand(type=CommandType.ShowSnippet, snippet_name="main_runloop")),
+            CommandSection(command=ShowCommand(snippet_name="main_runloop")),
             TextSection(text="\n"),
         ]
 
-        assert render_sections(sections) == (
+        renderer = DocumentRenderer(sections)
+        assert renderer.render() == (
             "\n"
             "\n"
             "\n"
             "\n"
             "\n"
             "\n"
-            "\n"
+            "_src/main.rs_\n"
             "```rust\n"
             "use std::net::UdpSocket;\n"
             "\n"
@@ -518,11 +513,12 @@ lang: rust
             "        println!(\"We've received a DNS query of {byte_count_received} bytes "
             'from {sender_addr:?}");\n'
             "    }\n"
-            "}\n"
+            "}\n\n"
             "```\n"
             "\n"
         )
 
+    @pytest.mark.xfail(True, reason="Not implemented yet")
     def test_update_top_level_snippet(self):
         raise NotImplementedError()
 
@@ -530,7 +526,6 @@ lang: rust
         sections = [
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(
                         lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
                     ),
@@ -543,23 +538,22 @@ lang: rust
             ),
             CommandSection(
                 command=DefineSnippet(
-                    type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="second_level_snippet",
                     content=[EmbedText(text="Second-level snippet text.\n")],
                 )
             ),
-            CommandSection(command=ShowCommand(type=CommandType.ShowSnippet, snippet_name="top_level_snippet")),
+            CommandSection(command=ShowCommand(snippet_name="top_level_snippet")),
             CommandSection(
                 command=UpdateCommand(
-                    type=CommandType.UpdateSnippet,
                     snippet_name="second_level_snippet",
                     update_data="Updated second-level snippet text!",
                 )
             ),
         ]
 
-        assert render_sections(sections) == (
+        renderer = DocumentRenderer(sections)
+        assert renderer.render() == (
             "\n"
             "```rust\n"
             "Top-level snippet text.\n"

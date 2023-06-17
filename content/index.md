@@ -12,7 +12,7 @@ $ cargo new dns_resolver --bin
 $ cd dns_resolver
 ```
 
-If you strip away our DNS resolver to the bare bones, its core runloop will be composed of a _request_ and a response_. Our general approach will be:
+If you strip away our DNS resolver to the bare bones, its core runloop will be composed of a _request_ and a _response_. Our general approach will be:
 
 1. _Wait_ for a DNS request to arrive.
 2. _Parse_ the request.
@@ -52,7 +52,6 @@ use std::net::UdpSocket;
 
 {{define main_module_definitions
 lang: rust
-###
 }}
 
 {{define main_runloop_bind_to_socket
