@@ -6,14 +6,14 @@ Cursor = int
 
 
 class TokenType(Enum):
-    EOF = auto(),
-    Word = auto(),
-    Comma = auto(),
-    LeftBrace = auto(),
-    RightBrace = auto(),
-    Space = auto(),
-    Newline = auto(),
-    Hash = auto(),
+    EOF = (auto(),)
+    Word = (auto(),)
+    Comma = (auto(),)
+    LeftBrace = (auto(),)
+    RightBrace = (auto(),)
+    Space = (auto(),)
+    Newline = (auto(),)
+    Hash = (auto(),)
 
     @classmethod
     def try_from_str(cls, s: str) -> Self | None:
@@ -118,5 +118,3 @@ class TestLexer:
         assert lexer.next() == Token(TokenType.EOF, "", 22, 22)
         assert lexer.next() == Token(TokenType.EOF, "", 22, 22)
         assert lexer.next() == Token(TokenType.EOF, "", 22, 22)
-
-

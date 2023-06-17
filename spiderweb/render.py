@@ -11,7 +11,8 @@ from spiderweb.markdown_parser import (
     Command,
     CommandType,
     EmbedText,
-    EmbedSnippet, SnippetProductionRule,
+    EmbedSnippet,
+    SnippetProductionRule,
 )
 from spiderweb.snippet import SnippetRepository, SnippetHeader, SnippetLanguage, Snippet
 from spiderweb.env import ROOT_FOLDER
@@ -21,6 +22,7 @@ from spiderweb.shell_utils import run_and_check, run_and_capture_output
 SnippetName = str
 ProductionRuleIndex = int
 StringIndex = int
+
 
 @dataclass
 class TextSection:
@@ -60,7 +62,12 @@ def parse_document_text(text: str) -> list[DocumentSection]:
     return output_sections
 
 
-def render_snippet(defined_snippets: dict[SnippetName, InlineSnippet], snippet: InlineSnippet, is_nested: bool, highlight_snippet_idx: int | None) -> (str, dict[ProductionRuleIndex, StringIndex]):
+def render_snippet(
+    defined_snippets: dict[SnippetName, InlineSnippet],
+    snippet: InlineSnippet,
+    is_nested: bool,
+    highlight_snippet_idx: int | None,
+) -> (str, dict[ProductionRuleIndex, StringIndex]):
     out = str()
     rules_to_start_idx = dict()
     if not is_nested:
@@ -108,10 +115,13 @@ def render_sections(sections: list[DocumentSection]) -> str:
             case CommandSection(command):
                 match command:
                     case ShowCommand(_, snippet_name):
-                        print(f'ShowCommand({snippet_name})')
+                        print(f"ShowCommand({snippet_name})")
                         snippet = defined_snippets[snippet_name]
                         rendered_snippet_text, _ = render_snippet(defined_snippets, snippet, False, None)
-                        file_name = snippet.header.file or find_parent_snippet(defined_snippets, rendered_snippets, snippet_name).header.file
+                        file_name = (
+                            snippet.header.file
+                            or find_parent_snippet(defined_snippets, rendered_snippets, snippet_name).header.file
+                        )
                         out += f"_{file_name}_"
                         out += rendered_snippet_text
                         print(rendered_snippet_text)
@@ -121,10 +131,10 @@ def render_sections(sections: list[DocumentSection]) -> str:
                         # Nothing to output for definitions
                         # But track it in our defined snippets
                         defined_snippets[snippet_name] = InlineSnippet(header, snippet_name, production_rules)
-                        print(f'Defined and tracked snippet {snippet_name}')
+                        print(f"Defined and tracked snippet {snippet_name}")
 
                     case UpdateCommand(_, snippet_name, updated_content):
-                        print(f'Updating {snippet_name}')
+                        print(f"Updating {snippet_name}")
                         existing_snippet = defined_snippets[snippet_name]
                         # Currently snippets can just be updated with new text, and cannot be updated to include new
                         # production rules
@@ -143,21 +153,23 @@ def render_sections(sections: list[DocumentSection]) -> str:
                         # parent_snippet.production_rules[production_rule_idx].text = updated_content
 
                         # Display the update
-                        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(defined_snippets, parent_snippet, False, production_rule_idx)
+                        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(
+                            defined_snippets, parent_snippet, False, production_rule_idx
+                        )
                         highlight_start = rule_idx_to_start_idxs[production_rule_idx]
-                        print(f'Found start of highlight at {highlight_start}')
+                        print(f"Found start of highlight at {highlight_start}")
                         # TODO(PT): This won't work when the highlight is at the end
                         highlight_end = rule_idx_to_start_idxs[production_rule_idx + 1]
                         newline_counter = 0
                         for i, ch in enumerate(reversed(rendered_snippet_text[:highlight_start])):
-                            if ch == '\n':
+                            if ch == "\n":
                                 newline_counter += 1
                             if newline_counter == 3:
                                 context_start = highlight_start - i
                                 break
                         newline_counter = 0
                         for i, ch in enumerate(rendered_snippet_text[highlight_end:]):
-                            if ch == '\n':
+                            if ch == "\n":
                                 newline_counter += 1
                             if newline_counter == 3:
                                 context_end = highlight_end + i
@@ -170,7 +182,9 @@ def render_sections(sections: list[DocumentSection]) -> str:
                         out += f"\n```\n"
                         rendered_snippets.append(parent_snippet)
 
-                        assert defined_snippets[parent_snippet.name] == parent_snippet, "need to reset snippet state in state"
+                        assert (
+                            defined_snippets[parent_snippet.name] == parent_snippet
+                        ), "need to reset snippet state in state"
 
                     case command_type:
                         raise NotImplementedError(f"Don't know how to render a {command_type}")
@@ -180,7 +194,7 @@ def render_sections(sections: list[DocumentSection]) -> str:
 def find_parent_snippet(
     defined_snippets: dict[SnippetName, InlineSnippet],
     recently_displayed_snippets: list[InlineSnippet],
-    this_snippet_name: SnippetName
+    this_snippet_name: SnippetName,
 ) -> InlineSnippet:
     # Start from the back, so we can reach the most-up-to-date snippets first
     for recently_displayed_snippet in reversed(recently_displayed_snippets):
@@ -196,14 +210,14 @@ def find_parent_snippet(
                 if production_rule.snippet_name == this_snippet_name:
                     return parent_snippet
 
-    raise ValueError(f'Failed to find a displayed parent for {this_snippet_name}')
+    raise ValueError(f"Failed to find a displayed parent for {this_snippet_name}")
 
 
 def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, embedded_snippet_name: SnippetName) -> int:
-    for (i, production_rule) in enumerate(parent_snippet.production_rules):
+    for i, production_rule in enumerate(parent_snippet.production_rules):
         if isinstance(production_rule, EmbedSnippet) and production_rule.snippet_name == embedded_snippet_name:
             return i
-    raise ValueError(f'Failed to find an embedding for {embedded_snippet_name} within {parent_snippet.name}')
+    raise ValueError(f"Failed to find an embedding for {embedded_snippet_name} within {parent_snippet.name}")
 
 
 def render_program(name: str) -> Path:
@@ -365,17 +379,17 @@ lang: rust
                         EmbedSnippet(snippet_name="main_runloop_bind_to_socket"),
                         EmbedText(
                             text="\n"
-                                 "    let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];\n"
-                                 '    println!("Awaiting incoming packets...");\n'
-                                 "    loop {\n"
-                                 "        let (byte_count_received, sender_addr) = socket\n"
-                                 "            .recv_from(&mut receive_packet_buf)\n"
-                                 '            .expect("Failed to read from the socket");\n'
-                                 "\n"
-                                 "        println!(\"We've received a DNS query of {byte_count_received} bytes from "
-                                 '{sender_addr:?}");\n'
-                                 "    }\n"
-                                 "}\n"
+                            "    let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];\n"
+                            '    println!("Awaiting incoming packets...");\n'
+                            "    loop {\n"
+                            "        let (byte_count_received, sender_addr) = socket\n"
+                            "            .recv_from(&mut receive_packet_buf)\n"
+                            '            .expect("Failed to read from the socket");\n'
+                            "\n"
+                            "        println!(\"We've received a DNS query of {byte_count_received} bytes from "
+                            '{sender_addr:?}");\n'
+                            "    }\n"
+                            "}\n"
                         ),
                     ],
                 )
@@ -398,13 +412,13 @@ lang: rust
                     content=[
                         EmbedText(
                             text="    let socket "
-                                 "= "
-                                 'UdpSocket::bind("127.0.0.1:53")\n'
-                                 "        "
-                                 '.expect("Failed '
-                                 "to bind to our "
-                                 "local DNS "
-                                 'port");\n'
+                            "= "
+                            'UdpSocket::bind("127.0.0.1:53")\n'
+                            "        "
+                            '.expect("Failed '
+                            "to bind to our "
+                            "local DNS "
+                            'port");\n'
                         )
                     ],
                 )
@@ -425,9 +439,7 @@ lang: rust
                     snippet_name="main_runloop",
                     content=[
                         EmbedSnippet(snippet_name="main_imports"),
-                        EmbedText(
-                            text="\n\nconst MAX_DNS_UDP_PACKET_SIZE: usize = 512;\n\nfn main() {\n"
-                        ),
+                        EmbedText(text="\n\nconst MAX_DNS_UDP_PACKET_SIZE: usize = 512;\n\nfn main() {\n"),
                         EmbedSnippet(snippet_name="main_runloop_bind_to_socket"),
                         EmbedText(
                             text=(
@@ -479,36 +491,37 @@ lang: rust
         ]
 
         assert render_sections(sections) == (
-            '\n'
-            '\n'
-            '\n'
-            '\n'
-            '\n'
-            '\n'
-            '\n'
-            '```rust\n'
-            'use std::net::UdpSocket;\n'
-            '\n'
-            '\n'
-            'const MAX_DNS_UDP_PACKET_SIZE: usize = 512;\n'
-            '\n'
-            'fn main() {\n'
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "```rust\n"
+            "use std::net::UdpSocket;\n"
+            "\n"
+            "\n"
+            "const MAX_DNS_UDP_PACKET_SIZE: usize = 512;\n"
+            "\n"
+            "fn main() {\n"
             '    let socket = UdpSocket::bind("127.0.0.1:53")\n'
             '        .expect("Failed to bind to our local DNS port");\n'
-            '\n'
-            '    let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];\n'
+            "\n"
+            "    let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];\n"
             '    println!("Awaiting incoming packets...");\n'
-            '    loop {\n'
-            '        let (byte_count_received, sender_addr) = socket\n'
-            '            .recv_from(&mut receive_packet_buf)\n'
+            "    loop {\n"
+            "        let (byte_count_received, sender_addr) = socket\n"
+            "            .recv_from(&mut receive_packet_buf)\n"
             '            .expect("Failed to read from the socket");\n'
-            '\n'
-            '        println!("We\'ve received a DNS query of {byte_count_received} bytes '
+            "\n"
+            "        println!(\"We've received a DNS query of {byte_count_received} bytes "
             'from {sender_addr:?}");\n'
-            '    }\n'
-            '}\n'
-            '```\n'
-            '\n')
+            "    }\n"
+            "}\n"
+            "```\n"
+            "\n"
+        )
 
     def test_update_top_level_snippet(self):
         raise NotImplementedError()
@@ -541,20 +554,20 @@ lang: rust
                 command=UpdateCommand(
                     type=CommandType.UpdateSnippet,
                     snippet_name="second_level_snippet",
-                    update_data="Updated second-level snippet text!"
+                    update_data="Updated second-level snippet text!",
                 )
             ),
         ]
 
         assert render_sections(sections) == (
-            '\n'
-            '```rust\n'
-            'Top-level snippet text.\n'
-            'Second-level snippet text.\n'
-            '```\n'
-            '\n'
-            '```rust\n'
-            'Top-level snippet text.\n'
+            "\n"
+            "```rust\n"
+            "Top-level snippet text.\n"
+            "Second-level snippet text.\n"
+            "```\n"
+            "\n"
+            "```rust\n"
+            "Top-level snippet text.\n"
             '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated second-level '
-            'snippet text!</div>{{< /rawhtml >}}```\n'
+            "snippet text!</div>{{< /rawhtml >}}```\n"
         )

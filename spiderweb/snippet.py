@@ -25,7 +25,7 @@ class SnippetHeader(BaseModel):
     file: Optional[str] = Field(default=None)
 
     def __str__(self) -> str:
-        return f'Header(lang={self.lang.value}, is_executable={self.is_executable}, dependencies={self.dependencies}, file={self.file})'
+        return f"Header(lang={self.lang.value}, is_executable={self.is_executable}, dependencies={self.dependencies}, file={self.file})"
 
 
 @dataclass
@@ -35,7 +35,7 @@ class Snippet:
     text: str
 
     def __repr__(self) -> str:
-        return f'Snippet(path={self.path.relative_to(ROOT_FOLDER)}, header={self.header})'
+        return f"Snippet(path={self.path.relative_to(ROOT_FOLDER)}, header={self.header})"
 
     @classmethod
     def from_file(cls, path: Path) -> Self:
@@ -78,7 +78,7 @@ class SnippetRepository:
         chapter_1_snippets = CHAPTER_1_ROOT / "snippets"
         snippets = {}
         for file in chapter_1_snippets.iterdir():
-            print(f'parsing {file.as_posix()}')
+            print(f"parsing {file.as_posix()}")
             snippets[file.name] = Snippet.from_file(file)
         self.snippets = snippets
 
@@ -90,9 +90,11 @@ class SnippetRepository:
         # First, render any dependencies of this snippet
         for dep in snippet.header.dependencies:
             dep_snippet = self.get(dep)
-            render_descriptions.extend(self.render_snippet(dep_snippet, strip_presentation_commands=strip_presentation_commands))
+            render_descriptions.extend(
+                self.render_snippet(dep_snippet, strip_presentation_commands=strip_presentation_commands)
+            )
 
-        print(f'render_snippet({snippet})')
+        print(f"render_snippet({snippet})")
         breaks = snippet.text.split("{{")
         this_snippet_text = ""
         for section in breaks:
@@ -116,7 +118,7 @@ class SnippetRepository:
                     # Treat this as an embedded snippet
                     embedded_snippet_render_description = self.get(embedded_command_or_snippet_name)
                     # Ensure embedded snippets don't specify an output path
-                    #if embedded_snippet_render_description.header.file:
+                    # if embedded_snippet_render_description.header.file:
                     #    raise ValueError(f"Did not expect an embedded snippet to want to be rendered to a specific path, but specified {embedded_snippet_render_description.header.file}")
                     this_snippet_text += self.render_snippet(embedded_snippet_render_description)[0].text
 
@@ -125,9 +127,5 @@ class SnippetRepository:
 
             # Just text prior
             this_snippet_text += section
-        render_descriptions.append(
-            SnippetRenderDescription(text=this_snippet_text, file=snippet.header.file)
-        )
+        render_descriptions.append(SnippetRenderDescription(text=this_snippet_text, file=snippet.header.file))
         return render_descriptions
-
-

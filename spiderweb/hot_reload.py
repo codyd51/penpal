@@ -10,13 +10,13 @@ from spiderweb.env import CONTENT_ROOT, CHAPTER_1_ROOT
 class EventHandler(FileSystemEventHandler):
     def on_any_event(self, event):
         # print(event)
-        print(f'Rendering markdown in response to {event}...')
+        print(f"Rendering markdown in response to {event}...")
         try:
             raise NotImplementedError()
             # render_markdown()
             render_programs()
         except Exception as e:
-            print(f'Failed to render to markdown: {e}')
+            print(f"Failed to render to markdown: {e}")
             raise
 
 
@@ -34,5 +34,5 @@ def main():
     observer.join()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

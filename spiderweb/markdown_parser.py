@@ -7,6 +7,7 @@ import yaml
 from spiderweb.lexer import TokenType, Lexer, Token, TestLexer
 from spiderweb.snippet import SnippetHeader, SnippetLanguage
 
+
 @dataclass
 class EmbedSnippet:
     snippet_name: str
@@ -21,10 +22,10 @@ SnippetProductionRule = EmbedSnippet | EmbedText
 
 
 class CommandType(Enum):
-    UpdateSnippet = 0,
-    ShowSnippet = 1,
-    ExecuteProgram = 2,
-    DefineSnippet = 3,
+    UpdateSnippet = (0,)
+    ShowSnippet = (1,)
+    ExecuteProgram = (2,)
+    DefineSnippet = (3,)
 
     @classmethod
     def from_str(cls, s: str) -> Self:
@@ -97,10 +98,10 @@ class MarkdownParser:
 
             for break_on_sequence in break_on_any_of_sequences:
                 # Look back at the last few tokens and see if it matches the break sequence
-                last_few_tokens = tokens[-len(break_on_sequence):]
+                last_few_tokens = tokens[-len(break_on_sequence) :]
                 if [t.type for t in last_few_tokens] == break_on_sequence:
                     # Strip the break tokens
-                    tokens = tokens[:-len(break_on_sequence)]
+                    tokens = tokens[: -len(break_on_sequence)]
                     # Rewind the cursor
                     self.lexer.cursor = last_few_tokens[0].start_pos
                     return tokens
@@ -115,15 +116,17 @@ class MarkdownParser:
         out = []
         # Handle nested commands
         while True:
-            tokens_before_nested_command = self.read_tokens_until_any_sequence([self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ])
+            tokens_before_nested_command = self.read_tokens_until_any_sequence(
+                [self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ]
+            )
             print("".join(t.value for t in tokens_before_nested_command))
             # What's next?
             peek = self.lexer.peek()
             # A double-peek would be nice to be totally sure of our state
             if peek.type == TokenType.LeftBrace:
-                print(f'Found a nested command!')
+                print(f"Found a nested command!")
             elif peek.type == TokenType.RightBrace:
-                print(f'Found the end of a command')
+                print(f"Found the end of a command")
             else:
                 raise ValueError(f"Unexpected token type {peek.type}")
             return
@@ -132,7 +135,9 @@ class MarkdownParser:
         out = []
         while True:
             # Handle nested commands
-            tokens_before_nested_command = self.read_tokens_until_any_sequence([self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ])
+            tokens_before_nested_command = self.read_tokens_until_any_sequence(
+                [self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ]
+            )
             # We might immediately have an embed-snippet rule
             if len(tokens_before_nested_command):
                 text_before_nested_command = "".join(t.value for t in tokens_before_nested_command)
@@ -142,13 +147,13 @@ class MarkdownParser:
             peek = self.lexer.peek()
             # A double-peek would be nice to be totally sure of our state
             if peek.type == TokenType.LeftBrace:
-                print(f'Found a nested snippet!')
+                print(f"Found a nested snippet!")
                 self.match_command_open()
                 embedded_snippet_name = self.match_word()
                 self.match_command_close()
                 out.append(EmbedSnippet(embedded_snippet_name))
             elif peek.type == TokenType.RightBrace:
-                print(f'Found the end of a command')
+                print(f"Found the end of a command")
                 self.match_command_close()
                 break
             else:
@@ -187,25 +192,25 @@ class MarkdownParser:
         # Command name
         command_name = self.expect(TokenType.Word)
         command_type = CommandType.from_str(command_name.value)
-        print(f'Found command name {command_name} of type {command_type}')
+        print(f"Found command name {command_name} of type {command_type}")
         if command_type == CommandType.UpdateSnippet:
             self.expect(TokenType.Space)
             snippet_name = self.expect(TokenType.Word)
             self.expect(TokenType.Newline)
             update_data = self.read_tokens_until_sequence(self.END_COMMAND_SEQ)
             self.match_command_close()
-            print(f'snippet name {snippet_name} {update_data}')
+            print(f"snippet name {snippet_name} {update_data}")
 
             return UpdateCommand(
                 type=CommandType.UpdateSnippet,
                 snippet_name=snippet_name.value,
-                update_data="".join([t.value for t in update_data])
+                update_data="".join([t.value for t in update_data]),
             )
         elif command_type == CommandType.ShowSnippet:
             self.expect(TokenType.Space)
             snippet_name = self.expect(TokenType.Word)
             self.match_command_close()
-            print(f'snippet name {snippet_name}')
+            print(f"snippet name {snippet_name}")
 
             return ShowCommand(
                 type=CommandType.ShowSnippet,
@@ -249,20 +254,16 @@ use packet_header_layout;
         tokens = parser.read_tokens_until(TokenType.LeftBrace)
         assert "".join([t.value for t in tokens]) == (
             "To get started, let's add `bitvec` to our crate's dependencies.\n"
-            '\n'
+            "\n"
             "Now, let's start modeling the DNS header format! Make a new file, "
-            '`packet_header_layout.rs`.\n'
+            "`packet_header_layout.rs`.\n"
         )
 
         command = parser.parse_command()
         assert command == UpdateCommand(
             type=CommandType.UpdateSnippet,
             snippet_name="main_imports",
-            update_data=(
-                'use std::net::UdpSocket;\n'
-                '\n'
-                'use packet_header_layout;\n'
-            )
+            update_data=("use std::net::UdpSocket;\n" "\n" "use packet_header_layout;\n"),
         )
 
     def test_define(self):
@@ -303,14 +304,17 @@ fn main() {
             ),
             content=[
                 EmbedSnippet("main_imports"),
-                EmbedText("""
+                EmbedText(
+                    """
 
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 fn main() {
-"""),
+"""
+                ),
                 EmbedSnippet("main_runloop_bind_to_socket"),
-                EmbedText("""
+                EmbedText(
+                    """
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
     loop {
@@ -321,6 +325,7 @@ fn main() {
         println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
     }
 }
-"""),
-            ]
+"""
+                ),
+            ],
         )
