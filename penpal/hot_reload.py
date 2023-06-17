@@ -3,8 +3,8 @@ import time
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from spiderweb import render_programs
-from spiderweb.env import CONTENT_ROOT, CHAPTER_1_ROOT
+from penpal import render_programs
+from penpal.env import CONTENT_ROOT, CHAPTER_1_ROOT
 
 
 class EventHandler(FileSystemEventHandler):

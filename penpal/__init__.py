@@ -1,15 +1,13 @@
-from spiderweb.env import CHAPTER_1_ROOT, ROOT_FOLDER
-from spiderweb.render import (
+from penpal.env import CHAPTER_1_ROOT, ROOT_FOLDER
+from penpal.render import (
     render_programs,
     render_program,
     test_executable,
-    render_markdown,
-    parse_document,
     render_sections,
     parse_document_text,
 )
-from spiderweb.shell_utils import run_and_check, run_and_capture_output
-from spiderweb.snippet import SnippetRepository
+from penpal.shell_utils import run_and_check, run_and_capture_output
+from penpal.snippet import SnippetRepository
 
 
 def main():

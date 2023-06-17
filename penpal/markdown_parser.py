@@ -4,8 +4,8 @@ from typing import Self
 
 import yaml
 
-from spiderweb.lexer import TokenType, Lexer, Token, TestLexer
-from spiderweb.snippet import SnippetHeader, SnippetLanguage
+from penpal.lexer import TokenType, Lexer, Token, TestLexer
+from penpal.snippet import SnippetHeader, SnippetLanguage
 
 
 @dataclass

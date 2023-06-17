@@ -6,7 +6,7 @@ from typing import Optional, Self
 import yaml
 from pydantic import BaseModel, Field
 
-from spiderweb import ROOT_FOLDER, CHAPTER_1_ROOT
+from penpal import ROOT_FOLDER, CHAPTER_1_ROOT
 
 
 class SnippetLanguage(Enum):

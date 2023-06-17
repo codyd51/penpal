@@ -2,7 +2,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from spiderweb.markdown_parser import (
+from penpal.markdown_parser import (
     MarkdownParser,
     TokenType,
     ShowCommand,
@@ -14,9 +14,9 @@ from spiderweb.markdown_parser import (
     EmbedSnippet,
     SnippetProductionRule,
 )
-from spiderweb.snippet import SnippetRepository, SnippetHeader, SnippetLanguage, Snippet
-from spiderweb.env import ROOT_FOLDER
-from spiderweb.shell_utils import run_and_check, run_and_capture_output
+from penpal.snippet import SnippetRepository, SnippetHeader, SnippetLanguage, Snippet
+from penpal.env import ROOT_FOLDER
+from penpal.shell_utils import run_and_check, run_and_capture_output
 
 
 SnippetName = str
