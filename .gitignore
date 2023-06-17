@@ -3,3 +3,4 @@
 generated-site/public/
 generated-site/.hugo_build.lock
 generated-programs
+__pycache__

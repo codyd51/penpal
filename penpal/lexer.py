@@ -52,7 +52,7 @@ class Lexer:
         self.text = text
         self.cursor = 0
 
-    def peek(self) -> Token:
+    def _consume_token(self) -> Token:
         if self.cursor >= len(self.text):
             return Token.eof(len(self.text))
 
@@ -80,9 +80,22 @@ class Lexer:
         return Token(type=TokenType.Word, value="".join(chars), start_pos=start_pos, end_pos=cursor)
 
     def next(self) -> Token:
-        token = self.peek()
+        token = self._consume_token()
         self.cursor = token.end_pos
         return token
+
+    def peek(self) -> Token:
+        return self.peek_n(1)[0]
+
+    def peek_n(self, n: int) -> list[Token]:
+        start_cursor = self.cursor
+        tokens = [self.next() for _ in range(n)]
+        self.cursor = start_cursor
+        return tokens
+
+    def peek_next_token_types_match(self, next_types: list[TokenType]) -> bool:
+        peek_tokens = self.peek_n(len(next_types))
+        return [p.type for p in peek_tokens] == next_types
 
 
 class TestLexer:
