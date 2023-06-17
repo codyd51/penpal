@@ -12,7 +12,7 @@ $ cargo new dns_resolver --bin
 $ cd dns_resolver
 ```
 
-If you strip away our DNS resolver to the bare bones, its core runloop will be composed of a _request_ and a response_. Our general approach will be:
+If you strip away our DNS resolver to the bare bones, its core runloop will be composed of a _request_ and a _response_. Our general approach will be:
 
 1. _Wait_ for a DNS request to arrive.
 2. _Parse_ the request.
@@ -28,11 +28,9 @@ To get us started, let's _wait_ for DNS queries to come in.
 
 
 
-
 _src/main.rs_
 ```rust
 use std::net::UdpSocket;
-
 
 
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
@@ -40,7 +38,6 @@ const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 fn main() {
     let socket = UdpSocket::bind("127.0.0.1:53")
         .expect("Failed to bind to our local DNS port");
-
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
     loop {
@@ -73,7 +70,6 @@ Instead, while we're building things out, let's leave our system's DNS configura
 
 _src/main.rs_
 ```rust
-
 fn main() {
 {{< rawhtml >}}<div style="background-color: #4a4a00">    let socket = UdpSocket::bind("0.0.0.0:0")
         .expect("Failed to bind to a local socket");
@@ -240,7 +236,6 @@ Now, let's start modeling the DNS header format! Make a new file, `packet_header
 _src/main.rs_
 ```rust
 use std::net::UdpSocket;
-
 {{< rawhtml >}}<div style="background-color: #4a4a00">use packet_header_layout;
 </div>{{< /rawhtml >}}
 

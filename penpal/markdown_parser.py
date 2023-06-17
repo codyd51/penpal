@@ -135,8 +135,10 @@ class MarkdownParser:
         out = []
         while True:
             # Handle nested commands
+            end_command_seq = [TokenType.Newline, *self.END_COMMAND_SEQ]
+            print(end_command_seq)
             tokens_before_nested_command = self.read_tokens_until_any_sequence(
-                [self.BEGIN_COMMAND_SEQ, self.END_COMMAND_SEQ]
+                [self.BEGIN_COMMAND_SEQ, end_command_seq]
             )
             # We might immediately have an embed-snippet rule
             if len(tokens_before_nested_command):
@@ -144,25 +146,29 @@ class MarkdownParser:
                 out.append(EmbedText(text_before_nested_command))
 
             # What's next?
-            peek = self.lexer.peek()
-            # A double-peek would be nice to be totally sure of our state
-            if peek.type == TokenType.LeftBrace:
+            if self.lexer.peek_next_token_types_match(self.BEGIN_COMMAND_SEQ):
                 print(f"Found a nested snippet!")
                 self.match_command_open()
                 embedded_snippet_name = self.match_word()
+                print(embedded_snippet_name)
                 self.match_command_close()
                 out.append(EmbedSnippet(embedded_snippet_name))
-            elif peek.type == TokenType.RightBrace:
+            elif self.lexer.peek_next_token_types_match(end_command_seq):
                 print(f"Found the end of a command")
+                self.expect(TokenType.Newline)
                 self.match_command_close()
                 break
             else:
-                raise ValueError(f"Unexpected token type {peek.type}")
+                raise ValueError(f"Expected the beginning or end of a command, got {self.lexer.peek_n(3)}")
 
         return out
 
     def read_str_until_seq(self, delimiter_seq: list[TokenType]) -> str:
         tokens = self.read_tokens_until_sequence(delimiter_seq)
+        return "".join(t.value for t in tokens)
+
+    def read_str_until_any_seq(self, delimiter_seqs: list[list[TokenType]]) -> str:
+        tokens = self.read_tokens_until_any_sequence(delimiter_seqs)
         return "".join(t.value for t in tokens)
 
     def read_str_until(self, delimiter: TokenType) -> str:
@@ -192,7 +198,7 @@ class MarkdownParser:
         # Command name
         command_name = self.expect(TokenType.Word)
         command_type = CommandType.from_str(command_name.value)
-        print(f"Found command name {command_name} of type {command_type}")
+        print(f"Found command name {command_name.value} of type {command_type}")
         if command_type == CommandType.UpdateSnippet:
             self.expect(TokenType.Space)
             snippet_name = self.expect(TokenType.Word)
@@ -222,19 +228,29 @@ class MarkdownParser:
         elif command_type == CommandType.DefineSnippet:
             self.expect(TokenType.Space)
             snippet_name = self.read_str_until(TokenType.Newline)
-            header_separator = [TokenType.Hash, TokenType.Hash, TokenType.Hash]
-            header_str = self.read_str_until_seq(header_separator)
+            separate_head_from_content = [TokenType.Hash, TokenType.Hash, TokenType.Hash]
+            terminate_shorthand_definition = [TokenType.Newline, TokenType.RightBrace, TokenType.RightBrace]
+            header_str = self.read_str_until_any_seq([separate_head_from_content, terminate_shorthand_definition])
             header_dict = yaml.load(header_str, Loader=yaml.SafeLoader)
             header = SnippetHeader.parse_obj(header_dict)
-            self.expect_seq(header_separator)
-            self.expect(TokenType.Newline)
-            content = self.parse_snippet_production_rules()
-            return DefineSnippet(
-                type=CommandType.DefineSnippet,
-                snippet_name=snippet_name,
-                header=header,
-                content=content,
-            )
+            if self.lexer.peek_next_token_types_match(terminate_shorthand_definition):
+                self.expect_seq([*terminate_shorthand_definition, TokenType.Newline])
+                # Shorthand empty definition
+                return DefineSnippet(
+                    type=CommandType.DefineSnippet,
+                    snippet_name=snippet_name,
+                    header=header,
+                    content=[]
+                )
+            else:
+                self.expect_seq([*separate_head_from_content, TokenType.Newline])
+                content = self.parse_snippet_production_rules()
+                return DefineSnippet(
+                    type=CommandType.DefineSnippet,
+                    snippet_name=snippet_name,
+                    header=header,
+                    content=content,
+                )
         else:
             raise NotImplementedError(command_type)
 
