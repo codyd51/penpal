@@ -139,31 +139,51 @@ class InlineSnippet:
     production_rules: list[SnippetProductionRule]
 
 
-def render_snippet(defined_snippets: dict[SnippetName, InlineSnippet], snippet: InlineSnippet, is_nested: bool) -> str:
+ProductionRuleIndex = int
+StringIndex = int
+
+
+def render_snippet(defined_snippets: dict[SnippetName, InlineSnippet], snippet: InlineSnippet, is_nested: bool, highlight_snippet_idx: int | None) -> (str, dict[ProductionRuleIndex, StringIndex]):
     out = str()
+    rules_to_start_idx = dict()
     if not is_nested:
         # First, open a code block and define the language
         out += f"\n```{snippet.header.lang.value}\n"
 
-    for production_rule in snippet.production_rules:
+    for i, production_rule in enumerate(snippet.production_rules):
+        rules_to_start_idx[i] = len(out)
+
+        should_highlight_this_production = i == highlight_snippet_idx
+        if should_highlight_this_production:
+            # Insert some styling tags
+            out += "{{< rawhtml >}}"
+            out += '<div style="background-color: #4a4a00">'
+
         match production_rule:
             case EmbedText(text):
                 out += text
             case EmbedSnippet(inner_snippet_name):
                 inner_snippet = defined_snippets[inner_snippet_name]
-                out += render_snippet(defined_snippets, inner_snippet, True)
+                rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, True, None)
+                out += rendered_subsnippet
+
+        if should_highlight_this_production:
+            # End the styling tag
+            out += "</div>"
+            out += "{{< /rawhtml >}}"
 
     if not is_nested:
         # Close the code block
         out += "```\n"
 
-    return out
+    return out, rules_to_start_idx
 
 
 def render_sections(sections: list[DocumentSection]) -> str:
     out = str()
 
     defined_snippets: dict[SnippetName, InlineSnippet] = dict()
+    rendered_snippets: list[InlineSnippet] = list()
     for section in sections:
         match section:
             case TextSection(text):
@@ -171,17 +191,102 @@ def render_sections(sections: list[DocumentSection]) -> str:
             case CommandSection(command):
                 match command:
                     case ShowCommand(_, snippet_name):
+                        print(f'ShowCommand({snippet_name})')
                         snippet = defined_snippets[snippet_name]
-                        out += render_snippet(defined_snippets, snippet, False)
+                        rendered_snippet_text, _ = render_snippet(defined_snippets, snippet, False, None)
+                        file_name = snippet.header.file or find_parent_snippet(defined_snippets, rendered_snippets, snippet_name).header.file
+                        out += f"_{file_name}_"
+                        out += rendered_snippet_text
+                        print(rendered_snippet_text)
+                        rendered_snippets.append(snippet)
 
                     case DefineSnippet(_, header, snippet_name, production_rules):
                         # Nothing to output for definitions
                         # But track it in our defined snippets
                         defined_snippets[snippet_name] = InlineSnippet(header, snippet_name, production_rules)
                         print(f'Defined and tracked snippet {snippet_name}')
+
+                    case UpdateCommand(_, snippet_name, updated_content):
+                        print(f'Updating {snippet_name}')
+                        existing_snippet = defined_snippets[snippet_name]
+                        # Currently snippets can just be updated with new text, and cannot be updated to include new
+                        # production rules
+                        # It would be straightforward to support the former, though.
+                        existing_snippet.production_rules = [EmbedText(updated_content)]
+
+                        # Now, render the updated snippet
+                        # This snippet may not exist at the top level, and may only ever appear as a sub-snippet within
+                        # another snippet.
+                        # Therefore, we need to iterate the snippets to find the last time this snippet was used, to
+                        # be able to show where the update happens in the context of the source code.
+                        parent_snippet = find_parent_snippet(defined_snippets, rendered_snippets, snippet_name)
+                        # Replace the specified rule
+                        production_rule_idx = find_embedded_snippet_in_production_rules(parent_snippet, snippet_name)
+                        # print(f'Replacing {snippet_name} at index {production_rule_idx} in {parent_snippet.name}')
+                        # parent_snippet.production_rules[production_rule_idx].text = updated_content
+
+                        # Display the update
+                        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(defined_snippets, parent_snippet, False, production_rule_idx)
+                        highlight_start = rule_idx_to_start_idxs[production_rule_idx]
+                        print(f'Found start of highlight at {highlight_start}')
+                        # TODO(PT): This won't work when the highlight is at the end
+                        highlight_end = rule_idx_to_start_idxs[production_rule_idx + 1]
+                        newline_counter = 0
+                        for i, ch in enumerate(reversed(rendered_snippet_text[:highlight_start])):
+                            if ch == '\n':
+                                newline_counter += 1
+                            if newline_counter == 3:
+                                context_start = highlight_start - i
+                                break
+                        newline_counter = 0
+                        for i, ch in enumerate(rendered_snippet_text[highlight_end:]):
+                            if ch == '\n':
+                                newline_counter += 1
+                            if newline_counter == 3:
+                                context_end = highlight_end + i
+                                break
+
+                        file_name = existing_snippet.header.file or parent_snippet.header.file
+                        out += f"_{file_name}_\n"
+                        out += f"```rust\n"
+                        out += rendered_snippet_text[context_start:context_end]
+                        out += f"\n```\n"
+                        rendered_snippets.append(parent_snippet)
+
+                        assert defined_snippets[parent_snippet.name] == parent_snippet, "need to reset snippet state in state"
+
                     case command_type:
                         raise NotImplementedError(f"Don't know how to render a {command_type}")
     return out
+
+
+def find_parent_snippet(
+    defined_snippets: dict[SnippetName, InlineSnippet],
+    recently_displayed_snippets: list[InlineSnippet],
+    this_snippet_name: SnippetName
+) -> InlineSnippet:
+    # Start from the back, so we can reach the most-up-to-date snippets first
+    for recently_displayed_snippet in reversed(recently_displayed_snippets):
+        for production_rule in recently_displayed_snippet.production_rules:
+            if isinstance(production_rule, EmbedSnippet):
+                if production_rule.snippet_name == this_snippet_name:
+                    return recently_displayed_snippet
+
+    # Now try searching in non-displayed snippets
+    for _, parent_snippet in defined_snippets.items():
+        for production_rule in parent_snippet.production_rules:
+            if isinstance(production_rule, EmbedSnippet):
+                if production_rule.snippet_name == this_snippet_name:
+                    return parent_snippet
+
+    raise ValueError(f'Failed to find a displayed parent for {this_snippet_name}')
+
+
+def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, embedded_snippet_name: SnippetName) -> int:
+    for (i, production_rule) in enumerate(parent_snippet.production_rules):
+        if isinstance(production_rule, EmbedSnippet) and production_rule.snippet_name == embedded_snippet_name:
+            return i
+    raise ValueError(f'Failed to find an embedding for {embedded_snippet_name} within {parent_snippet.name}')
 
 
 def render_markdown(text: str) -> list[DocumentSection]:
@@ -478,7 +583,7 @@ lang: rust
                     type=CommandType.DefineSnippet,
                     header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
                     snippet_name="main_imports",
-                    content=[EmbedText(text="use " "std::net::UdpSocket;\n")],
+                    content=[EmbedText(text="use std::net::UdpSocket;\n")],
                 )
             ),
             TextSection(text="\n\n"),
@@ -489,14 +594,10 @@ lang: rust
                     snippet_name="main_runloop_bind_to_socket",
                     content=[
                         EmbedText(
-                            text="    let socket "
-                                 "= "
-                                 'UdpSocket::bind("127.0.0.1:53")\n'
-                                 "        "
-                                 '.expect("Failed '
-                                 "to bind to our "
-                                 "local DNS "
-                                 'port");\n'
+                            text=(
+                                '    let socket = UdpSocket::bind("127.0.0.1:53")\n'
+                                '        .expect("Failed to bind to our local DNS port");\n'
+                            )
                         )
                     ],
                 )
@@ -537,3 +638,52 @@ lang: rust
             '}\n'
             '```\n'
             '\n')
+
+    def test_update_top_level_snippet(self):
+        raise NotImplementedError()
+
+    def test_update_second_level_snippet(self):
+        sections = [
+            CommandSection(
+                command=DefineSnippet(
+                    type=CommandType.DefineSnippet,
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                    ),
+                    snippet_name="top_level_snippet",
+                    content=[
+                        EmbedText("Top-level snippet text.\n"),
+                        EmbedSnippet("second_level_snippet"),
+                    ],
+                )
+            ),
+            CommandSection(
+                command=DefineSnippet(
+                    type=CommandType.DefineSnippet,
+                    header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
+                    snippet_name="second_level_snippet",
+                    content=[EmbedText(text="Second-level snippet text.\n")],
+                )
+            ),
+            CommandSection(command=ShowCommand(type=CommandType.ShowSnippet, snippet_name="top_level_snippet")),
+            CommandSection(
+                command=UpdateCommand(
+                    type=CommandType.UpdateSnippet,
+                    snippet_name="second_level_snippet",
+                    update_data="Updated second-level snippet text!"
+                )
+            ),
+        ]
+
+        assert render_sections(sections) == (
+            '\n'
+            '```rust\n'
+            'Top-level snippet text.\n'
+            'Second-level snippet text.\n'
+            '```\n'
+            '\n'
+            '```rust\n'
+            'Top-level snippet text.\n'
+            '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated second-level '
+            'snippet text!</div>{{< /rawhtml >}}```\n'
+        )

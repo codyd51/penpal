@@ -21,8 +21,18 @@ If you strip away our DNS resolver to the bare bones, its core runloop will be c
 
 To get us started, let's _wait_ for DNS queries to come in.
 
+
+
+
+
+
+
+
+
+_src/main.rs_
 ```rust
 use std::net::UdpSocket;
+
 
 
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
@@ -30,6 +40,7 @@ const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 fn main() {
     let socket = UdpSocket::bind("127.0.0.1:53")
         .expect("Failed to bind to our local DNS port");
+
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
     loop {
@@ -40,7 +51,6 @@ fn main() {
         println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
     }
 }
-
 ```
 
 
@@ -55,34 +65,22 @@ thread 'main' panicked at 'Failed to bind to our local DNS port: Os { code: 13, 
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 ```
 
-This is a good call by the operating system! DNS traffic is important, as well as sensitive, and the OS shouldn't let any program that comes by handle these requests. 
+This is a good call by the operating system! DNS traffic is important, as well as sensitive, and the OS shouldn't let any program that comes by handle these requests.
 
 We're also not quite ready to handle all of our system's "real" DNS traffic, anyway. If we did try to route all our traffic through our nascent DNS resolver, it'd be difficult to even look up troubleshooting help!
 
-Instead, while we're building things out, let's leave our system's DNS configuration alone, and build our server off to the side. We'll send ourselves controlled test packets to ensure everything is working as expected, without needing to worry about all the complexities of real-world traffic upfront. 
+Instead, while we're building things out, let's leave our system's DNS configuration alone, and build our server off to the side. We'll send ourselves controlled test packets to ensure everything is working as expected, without needing to worry about all the complexities of real-world traffic upfront.
 
+_src/main.rs_
 ```rust
-use std::net::UdpSocket;
-
-
-const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 fn main() {
-{{< rawhtml >}}<div style="background-color: #4a4a00">
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind to a local socket");
+{{< rawhtml >}}<div style="background-color: #4a4a00">    let socket = UdpSocket::bind("0.0.0.0:0")
+        .expect("Failed to bind to a local socket");
     println!("Bound to {socket:?}");
 </div>{{< /rawhtml >}}
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
-    loop {
-        let (byte_count_received, sender_addr) = socket
-            .recv_from(&mut receive_packet_buf)
-            .expect("Failed to read from the socket");
-
-        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
-    }
-}
-
 ```
 
 
@@ -100,9 +98,9 @@ Our server is currently _awaiting_ a packet, and will remain in that state until
 
 ##### PT: Could go on a big digression here about the framed data format of OSI packets
 
-To send a DNS packet to our server, we'll use `dig`, a standard command line utility that allows manually sending DNS queries. `dig` will also automatically process the response that the DNS server sends back, which will come in handy further down the road. 
+To send a DNS packet to our server, we'll use `dig`, a standard command line utility that allows manually sending DNS queries. `dig` will also automatically process the response that the DNS server sends back, which will come in handy further down the road.
 
-For now, let's just send a request and see what happens. Since we haven't reconfigured our system's DNS, this request will be sent to whatever DNS resolver is already set up. 
+For now, let's just send a request and see what happens. Since we haven't reconfigured our system's DNS, this request will be sent to whatever DNS resolver is already set up.
 
 ```shell
 $ dig google.com A
@@ -179,7 +177,7 @@ whether the message is a query or a response, a standard query or some
 other opcode, etc.
 ```
 
-Cool! We'll start off parsing the header section, since the specification guarantees that it'll be around in every packet, and it contains useful info to boot. We'll find the header format in `Section 4.1.1. Header Section Format`. 
+Cool! We'll start off parsing the header section, since the specification guarantees that it'll be around in every packet, and it contains useful info to boot. We'll find the header format in `Section 4.1.1. Header Section Format`.
 
 ```text
   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
@@ -222,13 +220,18 @@ struct dns_packet_header {
 } __attribute__((packed));
 ```
 
-For all C's warts, this _is_ quite a nice and tidy way to describe a bit-field. Unfortunately, Rust doesn't natively provide the same facilities for terse bitfield descriptions. Our approach will use `bitvec::BitArray` to store the header as a whole, and we'll use `bitvec`'s bit-level access to build up our resolver's model of a DNS header. 
+For all C's warts, this _is_ quite a nice and tidy way to describe a bit-field. Unfortunately, Rust doesn't natively provide the same facilities for terse bitfield descriptions. Our approach will use `bitvec::BitArray` to store the header as a whole, and we'll use `bitvec`'s bit-level access to build up our resolver's model of a DNS header.
 
 To get started, let's add `bitvec` to our crate's dependencies.
 
+
+
+
+
+_Cargo.toml_
 ```toml
 [dependencies]
-bitvec = "*"
+bitvec = "1"
 ```
 
 
@@ -238,33 +241,18 @@ _src/main.rs_
 ```rust
 use std::net::UdpSocket;
 
-use packet_header_layout;
+{{< rawhtml >}}<div style="background-color: #4a4a00">use packet_header_layout;
+</div>{{< /rawhtml >}}
+
+const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 ```
 
 
+
+
+_packet_header_layout.rs_
 ```rust
-use std::net::UdpSocket;
-
-use packet_header_layout;
-
-
-const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
-
-fn main() {
-{{< rawhtml >}}<div style="background-color: #4a4a00">
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind to a local socket");
-    println!("Bound to {socket:?}");
-</div>{{< /rawhtml >}}
-    let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
-    println!("Awaiting incoming packets...");
-    loop {
-        let (byte_count_received, sender_addr) = socket
-            .recv_from(&mut receive_packet_buf)
-            .expect("Failed to read from the socket");
-
-        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
-    }
-}
-
+#[derive(Debug)]
+pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 ```
 
