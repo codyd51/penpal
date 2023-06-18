@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, auto
 from typing import Self
 
 import yaml
 
-from penpal.lexer import TokenType, Lexer, Token, TestLexer
+from penpal.lexer import TokenType, Lexer, Token
 from penpal.snippet import SnippetHeader, SnippetLanguage
 
 
@@ -22,10 +22,11 @@ SnippetProductionRule = EmbedSnippet | EmbedText
 
 
 class CommandType(Enum):
-    UpdateSnippet = 0
-    ShowSnippet = 1
-    ExecuteProgram = 2
-    DefineSnippet = 3
+    UpdateSnippet = auto()
+    ShowSnippet = auto()
+    ExecuteProgram = auto()
+    DefineSnippet = auto()
+    GenerateProgram = auto()
 
     @classmethod
     def from_str(cls, s: str) -> Self:
@@ -34,6 +35,7 @@ class CommandType(Enum):
             "show": CommandType.ShowSnippet,
             "execute": CommandType.ExecuteProgram,
             "define": CommandType.DefineSnippet,
+            "generate": CommandType.GenerateProgram,
         }[s]
 
 
@@ -60,7 +62,18 @@ class DefineSnippet:
     content: list[SnippetProductionRule]
 
 
-Command = UpdateCommand | ShowCommand | ExecuteProgram | DefineSnippet
+@dataclass
+class GenerateProgram:
+    pass
+
+
+Command = (
+    UpdateCommand
+    | ShowCommand
+    | ExecuteProgram
+    | DefineSnippet
+    | GenerateProgram
+)
 
 
 class MarkdownParser:
@@ -224,6 +237,10 @@ class MarkdownParser:
                 content=content,
             )
 
+    def parse_command__generate(self) -> GenerateProgram:
+        self.match_command_close()
+        return GenerateProgram()
+
     def parse_command(self) -> Command:
         # Expect two braces
         self.match_command_open()
@@ -239,6 +256,8 @@ class MarkdownParser:
             return self.parse_command__execute()
         elif command_type == CommandType.DefineSnippet:
             return self.parse_command__define()
+        elif command_type == CommandType.GenerateProgram:
+            return self.parse_command__generate()
         else:
             raise NotImplementedError(command_type)
 

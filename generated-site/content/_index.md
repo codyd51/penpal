@@ -225,14 +225,16 @@ Now, let's start modeling the DNS header format! Make a new file, `packet_header
 _src/main.rs_
 ```rust
 use std::net::UdpSocket;{{< rawhtml >}}<div style="background-color: #4a4a00">
-use packet_header_layout;</div>{{< /rawhtml >}}
+mod packet_header_layout;</div>{{< /rawhtml >}}
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 ```
 
 
-_packet_header_layout.rs_
+_src/packet_header_layout.rs_
 ```rust
+use bitvec::prelude::*;
+
 #[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 ```

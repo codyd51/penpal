@@ -12,10 +12,10 @@ from penpal.markdown_parser import (
     DefineSnippet,
     EmbedText,
     EmbedSnippet,
-    SnippetProductionRule,
+    SnippetProductionRule, GenerateProgram,
 )
 from penpal.snippet import SnippetRepository, SnippetHeader, SnippetLanguage
-from penpal.env import ROOT_FOLDER
+from penpal.env import ROOT_FOLDER, GENERATED_PROGRAMS_DIR
 from penpal.shell_utils import run_and_check, run_and_capture_output
 
 
@@ -36,6 +36,7 @@ class DocumentRenderer:
         self.document_sections = document_sections
         self.defined_snippets: dict[SnippetName, InlineSnippet] = dict()
         self.rendered_snippets: list[InlineSnippet] = list()
+        self.generated_program_count = 0
 
     @staticmethod
     def render_text_section(text_section: TextSection) -> str:
@@ -53,7 +54,6 @@ class DocumentRenderer:
         )
         out += f"_{file_name}_"
         out += rendered_snippet_text
-        print(rendered_snippet_text)
         self.rendered_snippets.append(snippet)
         return out
 
@@ -172,6 +172,34 @@ class DocumentRenderer:
 
             case UpdateCommand(_):
                 out += self.render_command__update(command)
+
+            case GenerateProgram():
+                # Don't render any markdown, but do produce a source tree
+                # First, identify all the 'top-level' files
+                program_name = f"snapshot_{self.generated_program_count}"
+                self.generated_program_count += 1
+
+                program_dir = GENERATED_PROGRAMS_DIR / program_name
+                if program_dir.exists():
+                    print(f"Deleting {program_dir}...")
+                    shutil.rmtree(program_dir.as_posix())
+
+                print(f"Rendering {program_name}")
+                run_and_check(["cargo", "new", program_name], cwd=GENERATED_PROGRAMS_DIR)
+
+                for snippet_name, snippet in self.defined_snippets.items():
+                    if snippet.header.file:
+                        print(f'Found top-level snippet {snippet.header.file}')
+                        path = program_dir / snippet.header.file
+                        rendered_snippet_text, _ = render_snippet(
+                            self.defined_snippets,
+                            snippet,
+                            CodeBlockFenceConfiguration.ExcludeFence,
+                            None
+                        )
+                        path.write_text(rendered_snippet_text)
+
+                run_and_check(["cargo", "build"], cwd=program_dir)
 
             case command_type:
                 raise NotImplementedError(f"Don't know how to render a {command_type}")

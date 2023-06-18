@@ -63,6 +63,7 @@ lang: rust
 }}
 
 {{show main_runloop}}
+{{generate}}
 
 When we try to run this, the operating system rejects our request:
 
@@ -86,6 +87,7 @@ Instead, while we're building things out, let's leave our system's DNS configura
         .expect("Failed to bind to a local socket");
     println!("Bound to {socket:?}");
 }}
+{{generate}}
 
 ```shell
 $ cargo run dns_resolver
@@ -252,15 +254,18 @@ Now, let's start modeling the DNS header format! Make a new file, `packet_header
 
 {{update main_module_definitions
 
-use packet_header_layout;
+mod packet_header_layout;
 }}
 
 {{define packet_header_layout
-file: packet_header_layout.rs
+file: src/packet_header_layout.rs
 lang: rust
 ###
+use bitvec::prelude::*;
+
 #[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 }}
 
 {{show packet_header_layout}}
+{{generate}}
