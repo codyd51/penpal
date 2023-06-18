@@ -114,7 +114,7 @@ class MarkdownParser:
         while True:
             # Handle nested commands
             tokens_before_nested_command = self.read_tokens_until_any_sequence(
-                [self.BEGIN_COMMAND_SEQ, self.END_MULTI_LINE_COMMAND_SEQ]
+                [self.BEGIN_COMMAND_SEQ, self.END_MULTI_LINE_COMMAND_SEQ, [*self.END_COMMAND_SEQ]]
             )
             # We might immediately have an embed-snippet rule, so it's not a guarantee that there will be text before
             # the first command.
@@ -128,12 +128,9 @@ class MarkdownParser:
                 embedded_snippet_name = self.match_word()
                 self.match_command_close()
                 out.append(EmbedSnippet(embedded_snippet_name))
-            elif self.lexer.peek_next_token_types_match(self.END_MULTI_LINE_COMMAND_SEQ):
-                self.expect(TokenType.Newline)
+            else:
                 self.match_command_close()
                 break
-            else:
-                raise ValueError(f"Expected the beginning or end of a command, got {self.lexer.peek_n(3)}")
 
         return out
 
@@ -161,7 +158,17 @@ class MarkdownParser:
         return self.expect_seq(self.BEGIN_COMMAND_SEQ)
 
     def match_command_close(self) -> list[Token]:
-        return self.expect_seq(self.END_COMMAND_SEQ)
+        # Most characters to least characters
+        delimiters = [
+            [TokenType.Newline, *self.END_COMMAND_SEQ, TokenType.Newline],
+            [TokenType.Newline, *self.END_COMMAND_SEQ],
+            [*self.END_COMMAND_SEQ, TokenType.Newline],
+            [*self.END_COMMAND_SEQ]
+        ]
+        for delimiter in delimiters:
+            if self.lexer.peek_next_token_types_match(delimiter):
+                return self.expect_seq(delimiter)
+        raise ValueError("Failed to match a command close!")
 
     def match_word(self) -> str:
         return self.expect(TokenType.Word).value
@@ -170,9 +177,10 @@ class MarkdownParser:
         self.expect(TokenType.Space)
         snippet_name = self.expect(TokenType.Word)
         self.expect(TokenType.Newline)
-        update_data = self.read_tokens_until_sequence(self.END_COMMAND_SEQ)
+        update_data = self.read_tokens_until_sequence(self.END_MULTI_LINE_COMMAND_SEQ)
+        self.expect(TokenType.Newline)
         self.match_command_close()
-        print(f"snippet name {snippet_name} {update_data}")
+        print(f"Parsing update, snippet name {snippet_name} {update_data}")
 
         return UpdateCommand(
             snippet_name=snippet_name.value,
@@ -321,4 +329,69 @@ fn main() {
 }"""
                 ),
             ],
+        )
+
+    def test_parse_define(self):
+        src = """{{define main_runloop
+file: src/main.rs
+lang: rust
+###
+{{main_module_definitions}}
+
+const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
+}}"""
+        parser = MarkdownParser(src)
+        assert parser.parse_command() == DefineSnippet(
+            header=SnippetHeader(
+                lang=SnippetLanguage.RUST,
+                is_executable=False,
+                dependencies=[],
+                file='src/main.rs'
+            ),
+            snippet_name='main_runloop',
+            content=[
+                EmbedSnippet(snippet_name='main_module_definitions'),
+                EmbedText(text=
+                    (
+                        '\n'
+                        'const MAX_DNS_UDP_PACKET_SIZE: usize = 512;'
+                    )
+                )
+            ]
+        )
+
+    def test_embed_snippet_in_define(self):
+        src = """{{define cargo_toml
+file: Cargo.toml
+lang: toml
+###
+[package]
+name = "dns_resolver"
+version = "0.1.0"
+edition = "2021"
+
+{{cargo_toml_dependencies}}
+}}
+"""
+        parser = MarkdownParser(src)
+        assert parser.parse_command() == DefineSnippet(
+            header=SnippetHeader(
+                lang=SnippetLanguage.TOML,
+                is_executable=False,
+                dependencies=[],
+                file='Cargo.toml'
+            ),
+            snippet_name='cargo_toml',
+            content=[
+                EmbedText(text=
+                    (
+                        '[package]\n'
+                        'name = "dns_resolver"\n'
+                        'version = "0.1.0"\n'
+                        'edition = "2021"\n'
+                        '\n'
+                    )
+                ),
+                EmbedSnippet(snippet_name='cargo_toml_dependencies')
+            ]
         )
