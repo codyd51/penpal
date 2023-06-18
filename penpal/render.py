@@ -1,5 +1,6 @@
 import shutil
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,6 @@ from penpal.markdown_parser import (
     ShowCommand,
     UpdateCommand,
     DefineSnippet,
-    CommandType,
     EmbedText,
     EmbedSnippet,
     SnippetProductionRule,
@@ -46,7 +46,7 @@ class DocumentRenderer:
         snippet_name = command.snippet_name
         print(f"ShowCommand({snippet_name})")
         snippet = self.defined_snippets[snippet_name]
-        rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, False, None)
+        rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
         file_name = (
                 snippet.header.file
                 or find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name).header.file
@@ -64,6 +64,62 @@ class DocumentRenderer:
         self.defined_snippets[snippet_name] = InlineSnippet(command.header, snippet_name, command.content)
         print(f"Defined and tracked snippet {snippet_name}")
         return str()
+
+    @staticmethod
+    def _find_context_start(
+        text: str,
+        index: StringIndex,
+    ) -> StringIndex:
+        lines = []
+        current_line_chars = []
+        remaining_lines_to_search = 3
+        for i, ch in enumerate(reversed(text[:index])):
+            if ch == "\n":
+                lines.append((index - i, "".join(reversed(current_line_chars))))
+                current_line_chars = []
+                remaining_lines_to_search -= 1
+                if remaining_lines_to_search == -1:
+                    break
+            else:
+                current_line_chars.append(ch)
+        lines.append((0, "".join(reversed(current_line_chars))))
+        ordered_lines = list(reversed(lines))
+        # Select the first line that has meaningful text
+        start_context_at_line_idx = len(ordered_lines) - 1
+        for i, (line_start_char_idx, line) in enumerate(reversed(ordered_lines)):
+            line_idx = len(ordered_lines) - 1 - i
+            if len(line):
+                start_context_at_line_idx = line_idx
+                break
+        return ordered_lines[start_context_at_line_idx][0]
+
+    @staticmethod
+    def _find_context_boundaries(
+        parent_snippet: InlineSnippet,
+        rendered_parent_text: str,
+        rule_idx_to_start_idxs: dict[ProductionRuleIndex, StringIndex],
+        highlight_rule_idx: ProductionRuleIndex,
+    ):
+        highlight_start = rule_idx_to_start_idxs[highlight_rule_idx]
+        print(f"Found start of highlight at {highlight_start}")
+        highlight_end = (
+            rule_idx_to_start_idxs[highlight_rule_idx + 1]
+            if highlight_rule_idx < (len(parent_snippet.production_rules) - 1)
+            else len(rendered_parent_text)
+        )
+        context_end = highlight_end
+
+        context_start = DocumentRenderer._find_context_start(rendered_parent_text, highlight_start)
+
+        newline_counter = 0
+        for i, ch in enumerate(rendered_parent_text[highlight_end:]):
+            if ch == "\n":
+                newline_counter += 1
+            if newline_counter == 3:
+                context_end = highlight_end + i
+                break
+
+        return context_start, context_end
 
     def render_command__update(self, command: UpdateCommand) -> str:
         out = str()
@@ -83,39 +139,22 @@ class DocumentRenderer:
         parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         # Replace the specified rule
         production_rule_idx = find_embedded_snippet_in_production_rules(parent_snippet, snippet_name)
-        # print(f'Replacing {snippet_name} at index {production_rule_idx} in {parent_snippet.name}')
-        # parent_snippet.production_rules[production_rule_idx].text = updated_content
 
         # Display the update
-        rendered_snippet_text, rule_idx_to_start_idxs = render_snippet(
-            self.defined_snippets, parent_snippet, False, production_rule_idx
+        rendered_parent_text, rule_idx_to_start_idxs = render_snippet(
+            self.defined_snippets, parent_snippet, CodeBlockFenceConfiguration.ExcludeFence, production_rule_idx
         )
-        highlight_start = rule_idx_to_start_idxs[production_rule_idx]
-        print(f"Found start of highlight at {highlight_start}")
-        highlight_end = (
-            rule_idx_to_start_idxs[production_rule_idx + 1]
-            if production_rule_idx < (len(parent_snippet.production_rules) - 1)
-            else len(rendered_snippet_text)
+        context_start, context_end = self._find_context_boundaries(
+            parent_snippet,
+            rendered_parent_text,
+            rule_idx_to_start_idxs,
+            production_rule_idx,
         )
-        newline_counter = 0
-        for i, ch in enumerate(reversed(rendered_snippet_text[:highlight_start])):
-            if ch == "\n":
-                newline_counter += 1
-            if newline_counter == 2:
-                context_start = highlight_start - i
-                break
-        newline_counter = 0
-        for i, ch in enumerate(rendered_snippet_text[highlight_end:]):
-            if ch == "\n":
-                newline_counter += 1
-            if newline_counter == 3:
-                context_end = highlight_end + i
-                break
 
         file_name = existing_snippet.header.file or parent_snippet.header.file
         out += f"_{file_name}_\n"
         out += f"```rust\n"
-        out += rendered_snippet_text[context_start:context_end]
+        out += rendered_parent_text[context_start:context_end]
         out += f"\n```\n"
         self.rendered_snippets.append(parent_snippet)
 
@@ -149,16 +188,20 @@ class DocumentRenderer:
 
         return out
 
+class CodeBlockFenceConfiguration(Enum):
+    IncludeFence = 0
+    ExcludeFence = 1
+
 
 def render_snippet(
     defined_snippets: dict[SnippetName, InlineSnippet],
     snippet: InlineSnippet,
-    is_nested: bool,
+    fence_configuration: CodeBlockFenceConfiguration,
     highlight_snippet_idx: int | None,
 ) -> (str, dict[ProductionRuleIndex, StringIndex]):
     out = str()
     rules_to_start_idx = dict()
-    if not is_nested:
+    if fence_configuration == CodeBlockFenceConfiguration.IncludeFence:
         # First, open a code block and define the language
         out += f"\n```{snippet.header.lang.value}\n"
 
@@ -176,7 +219,7 @@ def render_snippet(
                 out += text
             case EmbedSnippet(inner_snippet_name):
                 inner_snippet = defined_snippets[inner_snippet_name]
-                rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, True, None)
+                rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
                 out += rendered_subsnippet
 
         if should_highlight_this_production:
@@ -184,7 +227,7 @@ def render_snippet(
             out += "</div>"
             out += "{{< /rawhtml >}}"
 
-    if not is_nested:
+    if fence_configuration == CodeBlockFenceConfiguration.IncludeFence:
         # Close the code block
         out += "\n```\n"
 
@@ -565,3 +608,89 @@ lang: rust
             '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated second-level '
             "snippet text!</div>{{< /rawhtml >}}```\n"
         )
+
+    def test_update_identifies_context(self):
+        @dataclass
+        class TestVector:
+            define_snippet1_commands: list[SnippetProductionRule]
+            expected_output: str
+
+        vectors = [
+            TestVector(
+                define_snippet1_commands=[
+                    EmbedText("Top-level snippet text\n\n"),
+                    EmbedSnippet("snippet2"),
+                    EmbedText("Here's another line")
+                ],
+                expected_output=(
+                    '_src/main.rs_\n'
+                    '```rust\n'
+                    'Top-level snippet text\n'
+                    '\n'
+                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated '
+                    'content</div>{{< /rawhtml >}}\n'
+                    '```\n'
+                ),
+            ),
+            TestVector(
+                define_snippet1_commands=[
+                    EmbedText("Top-level snippet text\n"),
+                    EmbedSnippet("snippet2"),
+                    EmbedText("Here's another line")
+                ],
+                expected_output=(
+                    '_src/main.rs_\n'
+                    '```rust\n'
+                    'Top-level snippet text\n'
+                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated '
+                    'content</div>{{< /rawhtml >}}\n'
+                    '```\n'
+                ),
+            ),
+            TestVector(
+                define_snippet1_commands=[
+                    EmbedText("Line1\n"),
+                    EmbedText("Line2\n"),
+                    EmbedText("Line3\n"),
+                    EmbedSnippet("snippet2"),
+                    EmbedText("Here's another line")
+                ],
+                expected_output=(
+                    '_src/main.rs_\n'
+                    '```rust\n'
+                    'Line3\n'
+                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated content</div>{{< /rawhtml >}}\n'
+                    '```\n'
+                ),
+            ),
+        ]
+
+        for vector in vectors:
+            sections = [
+                CommandSection(
+                    command=DefineSnippet(
+                        header=SnippetHeader(
+                            lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                        ),
+                        snippet_name="snippet1",
+                        content=vector.define_snippet1_commands,
+                    )
+                ),
+                CommandSection(
+                    command=DefineSnippet(
+                        header=SnippetHeader(
+                            lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                        ),
+                        snippet_name="snippet2",
+                        content=[EmbedText("Original content")],
+                    )
+                ),
+                CommandSection(
+                    command=UpdateCommand(
+                        snippet_name="snippet2",
+                        update_data="Updated content",
+                    )
+                )
+            ]
+            renderer = DocumentRenderer(sections)
+            assert renderer.render() == vector.expected_output

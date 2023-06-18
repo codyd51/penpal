@@ -25,14 +25,9 @@ To get us started, let's _wait_ for DNS queries to come in.
 
 
 
-
-
-
 _src/main.rs_
 ```rust
 use std::net::UdpSocket;
-
-
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 fn main() {
@@ -49,7 +44,6 @@ fn main() {
     }
 }
 ```
-
 
 When we try to run this, the operating system rejects our request:
 
@@ -73,12 +67,10 @@ _src/main.rs_
 fn main() {
 {{< rawhtml >}}<div style="background-color: #4a4a00">    let socket = UdpSocket::bind("0.0.0.0:0")
         .expect("Failed to bind to a local socket");
-    println!("Bound to {socket:?}");
-</div>{{< /rawhtml >}}
+    println!("Bound to {socket:?}");</div>{{< /rawhtml >}}
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
 ```
-
 
 ```shell
 $ cargo run dns_resolver
@@ -222,27 +214,21 @@ To get started, let's add `bitvec` to our crate's dependencies.
 
 
 
-
-
 _Cargo.toml_
 ```toml
 [dependencies]
 bitvec = "1"
 ```
 
-
 Now, let's start modeling the DNS header format! Make a new file, `packet_header_layout.rs`.
 
 _src/main.rs_
 ```rust
-use std::net::UdpSocket;
-{{< rawhtml >}}<div style="background-color: #4a4a00">use packet_header_layout;
-</div>{{< /rawhtml >}}
-
+use std::net::UdpSocket;{{< rawhtml >}}<div style="background-color: #4a4a00">
+use packet_header_layout;</div>{{< /rawhtml >}}
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
+
 ```
-
-
 
 
 _packet_header_layout.rs_
@@ -250,4 +236,3 @@ _packet_header_layout.rs_
 #[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 ```
-

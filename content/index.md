@@ -32,6 +32,7 @@ const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 fn main() {
 {{main_runloop_bind_to_socket}}
+
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
     loop {
@@ -250,6 +251,7 @@ bitvec = "1"
 Now, let's start modeling the DNS header format! Make a new file, `packet_header_layout.rs`.
 
 {{update main_module_definitions
+
 use packet_header_layout;
 }}
 
