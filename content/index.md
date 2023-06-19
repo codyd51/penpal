@@ -40,7 +40,7 @@ fn main() {
             .recv_from(&mut receive_packet_buf)
             .expect("Failed to read from the socket");
 
-        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
+{{main_runloop_handle_packet}}
     }
 }
 }}
@@ -60,6 +60,12 @@ lang: rust
 ###
     let socket = UdpSocket::bind("127.0.0.1:53")
         .expect("Failed to bind to our local DNS port");
+}}
+
+{{define main_runloop_handle_packet
+lang: rust
+###
+        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
 }}
 
 {{show main_runloop}}
@@ -261,11 +267,283 @@ mod packet_header_layout;
 file: src/packet_header_layout.rs
 lang: rust
 ###
+use std::mem;
+use std::ops::Range;
+
 use bitvec::prelude::*;
 
 #[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
+{{packet_header_raw_methods}}
+}}
+
+{{define packet_header_raw_methods
+lang: rust
 }}
 
 {{show packet_header_layout}}
 {{generate}}
+
+We'll define a 'raw' buffer type that allows bit-level access atop the over-the-wire DNS packet. Let's define some groundwork for interacting with the different fields encoded within this buffer.
+
+{{update packet_header_raw_methods
+impl DnsPacketHeaderRaw {
+    pub(crate) const HEADER_SIZE: usize = mem::size_of::<Self>();
+
+    fn read_u16_at_index(&self, idx: usize) -> u16 {
+        let bits_in_u16 = 16;
+        let start_bit_idx = idx * bits_in_u16;
+        let end_bit_idx = (idx + 1) * bits_in_u16;
+        self.0[start_bit_idx..end_bit_idx].load::<u16>().to_be()
+    }
+
+    pub(crate) fn identifier(&self) -> u16 {
+        self.read_u16_at_index(0)
+    }
+
+    pub(crate) fn question_record_count(&self) -> u16 {
+        self.read_u16_at_index(2)
+    }
+
+    pub(crate) fn answer_record_count(&self) -> u16 {
+        self.read_u16_at_index(3)
+    }
+
+    pub(crate) fn authority_record_count(&self) -> u16 {
+        self.read_u16_at_index(4)
+    }
+
+    pub(crate) fn additional_record_count(&self) -> u16 {
+        self.read_u16_at_index(5)
+    }
+
+    fn read_bit_range_from_flags(&self, range: Range<usize>) -> u16 {
+        let flags = self.read_u16_at_index(1);
+        let flags_bits = flags.view_bits::<Msb0>();
+        let bits_in_range = flags_bits.get(range).unwrap();
+        bits_in_range.load::<u16>()
+    }
+
+    pub(crate) fn is_packet_a_response(&self) -> bool {
+        self.read_bit_range_from_flags(0..1) == 1
+    }
+
+    pub(crate) fn opcode(&self) -> u16 {
+        self.read_bit_range_from_flags(1..5)
+    }
+
+    pub(crate) fn is_packet_an_authoritative_answer(&self) -> bool {
+        self.read_bit_range_from_flags(5..6) == 1
+    }
+
+    pub(crate) fn is_packet_a_truncated_response(&self) -> bool {
+        self.read_bit_range_from_flags(6..7) == 1
+    }
+
+    pub(crate) fn is_recursion_desired(&self) -> bool {
+        self.read_bit_range_from_flags(7..8) == 1
+    }
+
+    pub(crate) fn is_recursion_available(&self) -> bool {
+        self.read_bit_range_from_flags(8..9) == 1
+    }
+
+    pub(crate) fn response_code(&self) -> u16 {
+        self.read_bit_range_from_flags(12..16)
+    }
+}
+}}
+
+Let's try it out with the packets `dig` sends us!
+
+{{update main_imports
+use std::net::UdpSocket;
+
+use packet_header_layout::DnsPacketHeaderRaw;
+}}
+
+{{update main_runloop_handle_packet
+        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
+        let (header_bytes, _body_bytes) = receive_packet_buf.split_at(DnsPacketHeaderRaw::HEADER_SIZE);
+        let header_raw = unsafe { &*(header_bytes.as_ptr() as *const DnsPacketHeaderRaw) };
+        println!("\tPacket ID:                {:04x}", header_raw.identifier());
+        println!("\tPacket opcode:            {:04x}", header_raw.opcode());
+        println!("\tIs the packet a response? {}", header_raw.is_packet_a_response());
+        println!("\tQuestion record count:    {:04}", header_raw.question_record_count());
+        println!("\tAnswer record count:      {:04}", header_raw.answer_record_count());
+        println!("\tAuthority record count:   {:04}", header_raw.authority_record_count());
+        println!("\tAdditional record count:  {:04}", header_raw.additional_record_count());
+}}
+{{generate}}
+
+```shell
+$ dig @0.0.0.0 -p 51456 google.com A
+```
+
+```shell
+$ cargo run dns_resolver
+    Finished dev [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/dns_resolver dns_resolver`
+Bound to UdpSocket { addr: 0.0.0.0:51456, fd: 3 }
+Awaiting incoming packets...
+We've received a DNS query of 39 bytes from 127.0.0.1:50084
+        Packet ID:                00d0
+        Packet opcode:            0000
+        Is the packet a response? false
+        Question record count:    0001
+        Answer record count:      0000
+        Authority record count:   0000
+        Additional record count:  0001
+```
+
+Now that we can make some sense of the on-the-wire packet header, it'll be nice to have a corresponding higher-level representation of the packet header. For example, the _raw_ header format encodes the _type_ of query in a 4-bit integer. We _could_ have code that looks like this:
+
+```rust
+match header.opcode {
+    0 => // Handle a Query packet
+    2 => // Handle a Status packet
+    4 => // Handle a Notify packet
+}
+```
+
+... but this isn't very expressive or clear. One very useful technique for keeping code readable and easy to reason with, is to encode domain logic into the type system. Let's do this by defining higher-level representations to store information about the packet header fields.
+
+{{define packet_header_rs
+file: src/packet_header.rs
+lang: rust
+###
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum DnsOpcode {
+    Query = 0,
+    Status = 2,
+    Notify = 4,
+}
+{{dns_opcode_try_from}}
+{{packet_header_fields}}
+{{define_packet_header}}
+{{packet_header_from_raw}}
+}}
+
+{{show packet_header_rs}}
+
+Let's define conversions from the 'raw' bit-fields stored in the on-the-wire packet to our strongly typed higher-level representations.
+
+{{define dns_opcode_try_from
+lang: rust
+###
+
+impl TryFrom<usize> for DnsOpcode {
+    type Error = usize;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Query),
+            2 => Ok(Self::Status),
+            4 => Ok(Self::Notify),
+            _ => Err(value),
+        }
+    }
+}
+}}
+{{show dns_opcode_try_from}}
+
+Let's flesh out this same concept for the rest of the header fields, by introducing a layer in between the 'raw' header and another representation which isn't constrained by the bitwise representation. 
+
+{{define packet_header_fields
+lang: rust
+###
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) struct ResponseFields {
+    is_packet_an_authoritative_answer: bool,
+    is_recursion_available: bool,
+    pub(crate) response_code: DnsPacketResponseCode,
+}
+
+impl ResponseFields {
+    pub(crate) fn new(
+        is_packet_an_authoritative_answer: bool,
+        is_recursion_available: bool,
+        response_code: DnsPacketResponseCode,
+    ) -> Self {
+        Self {
+            is_packet_an_authoritative_answer,
+            is_recursion_available,
+            response_code,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum PacketDirection {
+    Query,
+    Response(ResponseFields),
+}
+}}
+{{show packet_header_fields}}
+
+Certain fields are always present in the packet header on-the-wire, such as the `is_packet_an_authoritative_answer` flag. However, these fields are _only valid_ when the packet is a response! Queries still need to send the storage to contain them, but their value will be ignored. We're forced to model these fields even when dealing with a query in the _raw_ representation, but we can leverage the power of the type system by using a sum type to express that these fields are _only present_ when we're dealing with a `PacketDirection::Response()`. 
+
+Let's define the header itself.
+
+{{define define_packet_header
+lang: rust
+###
+
+#[derive(Debug, Clone)]
+pub(crate) struct DnsPacketHeader {
+    pub(crate) identifier: usize,
+    pub(crate) direction: PacketDirection,
+    pub(crate) opcode: DnsOpcode,
+    pub(crate) response_code: DnsPacketResponseCode,
+    pub(crate) is_packet_a_truncated_response: bool,
+    pub(crate) is_packet_an_authoritative_answer: bool,
+    pub(crate) is_recursion_desired: bool,
+    pub(crate) is_recursion_available: bool,
+    pub(crate) question_record_count: usize,
+    pub(crate) answer_record_count: usize,
+    pub(crate) authority_record_count: usize,
+    pub(crate) additional_record_count: usize,
+}
+}}
+{{show define_packet_header}}
+
+Finally, let's build a utility to convert the bitwise representation into the convenient representation.
+
+{{define packet_header_from_raw
+lang: rust
+###
+
+impl From<&DnsPacketHeaderRaw> for DnsPacketHeader {
+    fn from(raw: &DnsPacketHeaderRaw) -> Self {
+        Self {
+            identifier: raw.identifier(),
+            direction: match raw.is_response() {
+                true => PacketDirection::Response(
+                    ResponseFields::new(
+                        raw.is_authoritative_answer(),
+                        raw.is_recursion_available(),
+                        raw.response_code().try_into().unwrap(),
+                    )
+                ),
+                false => PacketDirection::Query,
+            },
+            opcode: DnsOpcode::try_from(raw.opcode())
+                        .unwrap_or_else(|op| panic!("Unexpected DNS opcode: {}", op)),
+            response_code: DnsPacketResponseCode::try_from(raw.response_code())
+                        .unwrap_or_else(|val| panic!("Unexpected response code: {}", val)),
+            is_truncated: raw.is_truncated(),
+            is_recursion_desired: raw.is_recursion_desired(),
+            is_recursion_available: raw.is_recursion_available(),
+            question_count: raw.question_record_count(),
+            answer_count: raw.answer_record_count(),
+            authority_count: raw.authority_record_count(),
+            additional_record_count: raw.additional_record_count(),
+        }
+    }
+}
+}}
+{{show packet_header_from_raw}}
+{{generate}}
+
+//We're now going to need some way to interpret the bytes we're receiving over-the-wire 
+

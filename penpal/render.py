@@ -246,9 +246,14 @@ def render_snippet(
             case EmbedText(text):
                 out += text
             case EmbedSnippet(inner_snippet_name):
-                inner_snippet = defined_snippets[inner_snippet_name]
-                rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
-                out += rendered_subsnippet
+                if inner_snippet_name in defined_snippets:
+                    inner_snippet = defined_snippets[inner_snippet_name]
+                    rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
+                    out += rendered_subsnippet
+                else:
+                    # TODO(PT): Track the implicitly defined snippets, and ensure they're defined later. Otherwise, it could be a typo.
+                    # Also show sections that are defined but never displayed
+                    print(f'Substituting empty block for implicitly defined snippet {inner_snippet_name}')
 
         if should_highlight_this_production:
             # End the styling tag
