@@ -42,19 +42,46 @@ class DocumentRenderer:
     def render_text_section(text_section: TextSection) -> str:
         return text_section.text
 
+    def render_snippet_in_context_of_parent(self, snippet_name: SnippetName, parent: InlineSnippet) -> str:
+        out = str()
+        # We're defining a snippet that was used in another parent snippet
+        # Show the snippet 'in-context'
+        production_rule_idx = find_embedded_snippet_in_production_rules(parent, snippet_name)
+        rendered_parent_text, rule_idx_to_start_idxs = render_snippet(
+            self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, production_rule_idx
+        )
+        context_start, context_end = self._find_context_boundaries(
+            parent,
+            rendered_parent_text,
+            rule_idx_to_start_idxs,
+            production_rule_idx,
+        )
+
+        file_name = parent.header.file
+        out += f"_{file_name}_\n"
+        out += f"```rust\n"
+        out += rendered_parent_text[context_start:context_end]
+        out += f"\n```\n"
+        return out
+
     def render_command__show(self, command: ShowCommand) -> str:
         out = str()
         snippet_name = command.snippet_name
         print(f"ShowCommand({snippet_name})")
         snippet = self.defined_snippets[snippet_name]
-        rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
-        file_name = (
-                snippet.header.file
-                or find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name).header.file
-        )
-        out += f"_{file_name}_"
-        out += rendered_snippet_text
         self.rendered_snippets.append(snippet)
+
+        maybe_parent = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        if not maybe_parent:
+            # This is a top-level snippet
+            file_name = snippet.header.file
+            rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
+            out += f"Top-level show, _{file_name}_"
+            out += rendered_snippet_text
+        else:
+            out += "Child contextual show, "
+            out += self.render_snippet_in_context_of_parent(snippet_name, maybe_parent)
+
         return out
 
     def render_command__define(self, command: DefineSnippet) -> str:
@@ -137,26 +164,9 @@ class DocumentRenderer:
         # Therefore, we need to iterate the snippets to find the last time this snippet was used, to
         # be able to show where the update happens in the context of the source code.
         parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
-        # Replace the specified rule
-        production_rule_idx = find_embedded_snippet_in_production_rules(parent_snippet, snippet_name)
-
-        # Display the update
-        rendered_parent_text, rule_idx_to_start_idxs = render_snippet(
-            self.defined_snippets, parent_snippet, CodeBlockFenceConfiguration.ExcludeFence, production_rule_idx
-        )
-        context_start, context_end = self._find_context_boundaries(
-            parent_snippet,
-            rendered_parent_text,
-            rule_idx_to_start_idxs,
-            production_rule_idx,
-        )
-
-        file_name = existing_snippet.header.file or parent_snippet.header.file
-        out += f"_{file_name}_\n"
-        out += f"```rust\n"
-        out += rendered_parent_text[context_start:context_end]
-        out += f"\n```\n"
         self.rendered_snippets.append(parent_snippet)
+        out += "Update, "
+        out += self.render_snippet_in_context_of_parent(snippet_name, parent_snippet)
 
         return out
 
@@ -199,7 +209,8 @@ class DocumentRenderer:
                         )
                         path.write_text(rendered_snippet_text)
 
-                run_and_check(["cargo", "build"], cwd=program_dir)
+                if self.generated_program_count > 3:
+                    run_and_check(["cargo", "build"], cwd=program_dir)
 
             case command_type:
                 raise NotImplementedError(f"Don't know how to render a {command_type}")
@@ -271,7 +282,7 @@ def find_parent_snippet(
     defined_snippets: dict[SnippetName, InlineSnippet],
     recently_displayed_snippets: list[InlineSnippet],
     this_snippet_name: SnippetName,
-) -> InlineSnippet:
+) -> InlineSnippet | None:
     # Start from the back, so we can reach the most-up-to-date snippets first
     for recently_displayed_snippet in reversed(recently_displayed_snippets):
         for production_rule in recently_displayed_snippet.production_rules:
@@ -286,7 +297,7 @@ def find_parent_snippet(
                 if production_rule.snippet_name == this_snippet_name:
                     return parent_snippet
 
-    raise ValueError(f"Failed to find a displayed parent for {this_snippet_name}")
+    return None
 
 
 def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, embedded_snippet_name: SnippetName) -> int:

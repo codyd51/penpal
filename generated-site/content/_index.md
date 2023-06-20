@@ -26,7 +26,7 @@ To get us started, let's _wait_ for DNS queries to come in.
 
 
 
-_src/main.rs_
+Top-level show, _src/main.rs_
 ```rust
 use std::net::UdpSocket;
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
@@ -62,7 +62,7 @@ We're also not quite ready to handle all of our system's "real" DNS traffic, any
 
 Instead, while we're building things out, let's leave our system's DNS configuration alone, and build our server off to the side. We'll send ourselves controlled test packets to ensure everything is working as expected, without needing to worry about all the complexities of real-world traffic upfront.
 
-_src/main.rs_
+Update, _src/main.rs_
 ```rust
 fn main() {
 {{< rawhtml >}}<div style="background-color: #4a4a00">    let socket = UdpSocket::bind("0.0.0.0:0")
@@ -214,15 +214,17 @@ To get started, let's add `bitvec` to our crate's dependencies.
 
 
 
-_Cargo.toml_
-```toml
-[dependencies]
-bitvec = "1"
+Child contextual show, _Cargo.toml_
+```rust
+edition = "2021"
+
+{{< rawhtml >}}<div style="background-color: #4a4a00">[dependencies]
+bitvec = "1"</div>{{< /rawhtml >}}
 ```
 
 Now, let's start modeling the DNS header format! Make a new file, `packet_header_layout.rs`.
 
-_src/main.rs_
+Update, _src/main.rs_
 ```rust
 use std::net::UdpSocket;{{< rawhtml >}}<div style="background-color: #4a4a00">
 mod packet_header_layout;</div>{{< /rawhtml >}}
@@ -232,7 +234,7 @@ const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
 
 
-_src/packet_header_layout.rs_
+Top-level show, _src/packet_header_layout.rs_
 ```rust
 use std::mem;
 use std::ops::Range;
@@ -246,7 +248,7 @@ pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 
 We'll define a 'raw' buffer type that allows bit-level access atop the over-the-wire DNS packet. Let's define some groundwork for interacting with the different fields encoded within this buffer.
 
-_src/packet_header_layout.rs_
+Update, _src/packet_header_layout.rs_
 ```rust
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 {{< rawhtml >}}<div style="background-color: #4a4a00">impl DnsPacketHeaderRaw {
@@ -318,7 +320,7 @@ pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 
 Let's try it out with the packets `dig` sends us!
 
-_src/main.rs_
+Update, _src/main.rs_
 ```rust
 {{< rawhtml >}}<div style="background-color: #4a4a00">use std::net::UdpSocket;
 
@@ -327,7 +329,7 @@ mod packet_header_layout;
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 ```
 
-_src/main.rs_
+Update, _src/main.rs_
 ```rust
             .expect("Failed to read from the socket");
 
@@ -376,7 +378,7 @@ match header.opcode {
 ... but this isn't very expressive or clear. One very useful technique for keeping code readable and easy to reason with, is to encode domain logic into the type system. Let's do this by defining higher-level representations to store information about the packet header fields.
 
 
-_src/packet_header.rs_
+Top-level show, _src/packet_header.rs_
 ```rust
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum DnsOpcode {
@@ -389,9 +391,10 @@ pub(crate) enum DnsOpcode {
 
 Let's define conversions from the 'raw' bit-fields stored in the on-the-wire packet to our strongly typed higher-level representations.
 
-_src/packet_header.rs_
+Child contextual show, _src/packet_header.rs_
 ```rust
-
+}
+{{< rawhtml >}}<div style="background-color: #4a4a00">
 impl TryFrom<usize> for DnsOpcode {
     type Error = usize;
 
@@ -403,14 +406,14 @@ impl TryFrom<usize> for DnsOpcode {
             _ => Err(value),
         }
     }
-}
+}</div>{{< /rawhtml >}}
 ```
 
 Let's flesh out this same concept for the rest of the header fields, by introducing a layer in between the 'raw' header and another representation which isn't constrained by the bitwise representation. 
 
-_src/packet_header.rs_
+Child contextual show, _src/packet_header.rs_
 ```rust
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+}{{< rawhtml >}}<div style="background-color: #4a4a00">#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct ResponseFields {
     is_packet_an_authoritative_answer: bool,
     is_recursion_available: bool,
@@ -435,16 +438,16 @@ impl ResponseFields {
 pub(crate) enum PacketDirection {
     Query,
     Response(ResponseFields),
-}
+}</div>{{< /rawhtml >}}
 ```
 
 Certain fields are always present in the packet header on-the-wire, such as the `is_packet_an_authoritative_answer` flag. However, these fields are _only valid_ when the packet is a response! Queries still need to send the storage to contain them, but their value will be ignored. We're forced to model these fields even when dealing with a query in the _raw_ representation, but we can leverage the power of the type system by using a sum type to express that these fields are _only present_ when we're dealing with a `PacketDirection::Response()`. 
 
 Let's define the header itself.
 
-_src/packet_header.rs_
+Child contextual show, _src/packet_header.rs_
 ```rust
-
+}{{< rawhtml >}}<div style="background-color: #4a4a00">
 #[derive(Debug, Clone)]
 pub(crate) struct DnsPacketHeader {
     pub(crate) identifier: usize,
@@ -459,14 +462,14 @@ pub(crate) struct DnsPacketHeader {
     pub(crate) answer_record_count: usize,
     pub(crate) authority_record_count: usize,
     pub(crate) additional_record_count: usize,
-}
+}</div>{{< /rawhtml >}}
 ```
 
 Finally, let's build a utility to convert the bitwise representation into the convenient representation.
 
-_src/packet_header.rs_
+Child contextual show, _src/packet_header.rs_
 ```rust
-
+}{{< rawhtml >}}<div style="background-color: #4a4a00">
 impl From<&DnsPacketHeaderRaw> for DnsPacketHeader {
     fn from(raw: &DnsPacketHeaderRaw) -> Self {
         Self {
@@ -494,7 +497,7 @@ impl From<&DnsPacketHeaderRaw> for DnsPacketHeader {
             additional_record_count: raw.additional_record_count(),
         }
     }
-}
+}</div>{{< /rawhtml >}}
 ```
 
 //We're now going to need some way to interpret the bytes we're receiving over-the-wire 
