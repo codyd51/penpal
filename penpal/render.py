@@ -2,6 +2,7 @@ import shutil
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Tuple
 
 import pytest
 
@@ -47,21 +48,32 @@ class DocumentRenderer:
         # We're defining a snippet that was used in another parent snippet
         # Show the snippet 'in-context'
         production_rule_idx = find_embedded_snippet_in_production_rules(parent, snippet_name)
-        rendered_parent_text, rule_idx_to_start_idxs = render_snippet(
+        rendered_parent = render_snippet(
             self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, production_rule_idx
         )
+
         context_start, context_end = self._find_context_boundaries(
             parent,
-            rendered_parent_text,
-            rule_idx_to_start_idxs,
+            rendered_parent.text,
+            rendered_parent.rule_idx_to_rendered_start_idx,
             production_rule_idx,
         )
 
+        # Re-render the parent, respecting the newly computed context window
+        bounded_rendered_parent = render_snippet(
+            self.defined_snippets,
+            parent,
+            CodeBlockFenceConfiguration.IncludeFence,
+            production_rule_idx,
+            (context_start, context_end)
+        )
+
         file_name = parent.header.file
-        out += f"_{file_name}_\n"
-        out += f"```rust\n"
-        out += rendered_parent_text[context_start:context_end]
-        out += f"\n```\n"
+        #out += f"_{file_name}_\n"
+        #out += f"```rust\n"
+        # out += rendered_parent.text[context_start:context_end]
+        #out += f"\n```\n"
+        out += bounded_rendered_parent.text
         return out
 
     def render_command__show(self, command: ShowCommand) -> str:
@@ -75,11 +87,11 @@ class DocumentRenderer:
         if not maybe_parent:
             # This is a top-level snippet
             file_name = snippet.header.file
-            rendered_snippet_text, _ = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
+            rendered_snippet = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
             out += f"Top-level show, _{file_name}_"
-            out += rendered_snippet_text
+            out += rendered_snippet.text
         else:
-            out += "Child contextual show, "
+            out += f"Child contextual show, `{snippet_name}`\n"
             out += self.render_snippet_in_context_of_parent(snippet_name, maybe_parent)
 
         return out
@@ -111,13 +123,16 @@ class DocumentRenderer:
                 current_line_chars.append(ch)
         lines.append((0, "".join(reversed(current_line_chars))))
         ordered_lines = list(reversed(lines))
-        # Select the first line that has meaningful text
+        # Select the second line that has meaningful text
+        context_line_count_with_meaningful_content = 0
         start_context_at_line_idx = len(ordered_lines) - 1
         for i, (line_start_char_idx, line) in enumerate(reversed(ordered_lines)):
             line_idx = len(ordered_lines) - 1 - i
             if len(line):
-                start_context_at_line_idx = line_idx
-                break
+                context_line_count_with_meaningful_content += 1
+                if context_line_count_with_meaningful_content == 2:
+                    start_context_at_line_idx = line_idx
+                    break
         return ordered_lines[start_context_at_line_idx][0]
 
     @staticmethod
@@ -166,6 +181,7 @@ class DocumentRenderer:
         parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         self.rendered_snippets.append(parent_snippet)
         out += "Update, "
+        out += f"_{parent_snippet.header.file}_"
         out += self.render_snippet_in_context_of_parent(snippet_name, parent_snippet)
 
         return out
@@ -201,15 +217,15 @@ class DocumentRenderer:
                     if snippet.header.file:
                         print(f'Found top-level snippet {snippet.header.file}')
                         path = program_dir / snippet.header.file
-                        rendered_snippet_text, _ = render_snippet(
+                        rendered_snippet = render_snippet(
                             self.defined_snippets,
                             snippet,
                             CodeBlockFenceConfiguration.ExcludeFence,
                             None
                         )
-                        path.write_text(rendered_snippet_text)
+                        path.write_text(rendered_snippet.text)
 
-                if self.generated_program_count > 3:
+                if self.generated_program_count > 100:
                     run_and_check(["cargo", "build"], cwd=program_dir)
 
             case command_type:
@@ -227,9 +243,17 @@ class DocumentRenderer:
 
         return out
 
+
 class CodeBlockFenceConfiguration(Enum):
     IncludeFence = 0
     ExcludeFence = 1
+
+
+@dataclass
+class RenderedSnippet:
+    text: str
+    rule_idx_to_rendered_start_idx: dict[ProductionRuleIndex, StringIndex]
+    highlight_range: Tuple[int, int] | None
 
 
 def render_snippet(
@@ -237,12 +261,19 @@ def render_snippet(
     snippet: InlineSnippet,
     fence_configuration: CodeBlockFenceConfiguration,
     highlight_snippet_idx: int | None,
-) -> (str, dict[ProductionRuleIndex, StringIndex]):
+    only_render_range: Tuple[StringIndex, StringIndex] | None = None,
+) -> RenderedSnippet:
     out = str()
     rules_to_start_idx = dict()
+
     if fence_configuration == CodeBlockFenceConfiguration.IncludeFence:
         # First, open a code block and define the language
-        out += f"\n```{snippet.header.lang.value}\n"
+        #out += f"{{< highlight {snippet.header.lang.value} \"linenos=table,hl_lines=8 15-17,linenostart=199\" >}}"
+        #out += f"\n```{snippet.header.lang.value}\n"
+        pass
+
+    highlight_start_line = None
+    highlight_end_line = None
 
     for i, production_rule in enumerate(snippet.production_rules):
         rules_to_start_idx[i] = len(out)
@@ -250,8 +281,9 @@ def render_snippet(
         should_highlight_this_production = i == highlight_snippet_idx
         if should_highlight_this_production:
             # Insert some styling tags
-            out += "{{< rawhtml >}}"
-            out += '<div style="background-color: #4a4a00">'
+            #out += "{{< rawhtml >}}"
+            #out += '<div style="background-color: #4a4a00">'
+            highlight_start_line = out.count("\n")
 
         match production_rule:
             case EmbedText(text):
@@ -259,8 +291,8 @@ def render_snippet(
             case EmbedSnippet(inner_snippet_name):
                 if inner_snippet_name in defined_snippets:
                     inner_snippet = defined_snippets[inner_snippet_name]
-                    rendered_subsnippet, _ = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
-                    out += rendered_subsnippet
+                    rendered_subsnippet = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
+                    out += rendered_subsnippet.text
                 else:
                     # TODO(PT): Track the implicitly defined snippets, and ensure they're defined later. Otherwise, it could be a typo.
                     # Also show sections that are defined but never displayed
@@ -268,14 +300,50 @@ def render_snippet(
 
         if should_highlight_this_production:
             # End the styling tag
-            out += "</div>"
-            out += "{{< /rawhtml >}}"
+            #out += "</div>"
+            #out += "{{< /rawhtml >}}"
+            highlight_end_line = out.count("\n")
 
+    # Trim according to the input
+    highlight_lines_slide = 0
+    if only_render_range:
+        trimmed_start = out[:only_render_range[0]]
+        highlight_lines_slide = trimmed_start.count("\n") - 1
+        highlight_start_line -= highlight_lines_slide
+        highlight_end_line -= highlight_lines_slide
+
+        out = out[only_render_range[0]:only_render_range[1]]
+
+    highlight_range = None
     if fence_configuration == CodeBlockFenceConfiguration.IncludeFence:
-        # Close the code block
-        out += "\n```\n"
+        # Now that we know where the highlight goes, we can add the annotation to the start of the code block
+        highlight_lines_opt = ""
+        if highlight_snippet_idx:
+            if highlight_start_line is None or highlight_end_line is None:
+                raise ValueError("Expected to identify highlight boundaries")
 
-    return out, rules_to_start_idx
+            highlight_range = (highlight_start_line, highlight_end_line)
+
+            highlight_lines_opt = f",hl_lines={highlight_start_line}-{highlight_end_line}"
+        highlight_annotation = (
+            f"\n{{{{<highlight {snippet.header.lang.value} \"" 
+            f"linenos=inline" 
+            f"{highlight_lines_opt}"
+            f",linenostart=25\""
+            ">}}"
+        )
+        out = f"{highlight_annotation}\n{out}"
+        out += "\n{{</highlight>}}\n"
+        print(out)
+        # Close the code block
+        # out += "\n```\n"
+        # out += f"{{</ highlight >}}"
+
+    return RenderedSnippet(
+        text=out,
+        rule_idx_to_rendered_start_idx=rules_to_start_idx,
+        highlight_range=highlight_range,
+    )
 
 
 def find_parent_snippet(
@@ -307,56 +375,10 @@ def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, emb
     raise ValueError(f"Failed to find an embedding for {embedded_snippet_name} within {parent_snippet.name}")
 
 
-def render_program(name: str) -> Path:
-    repo = SnippetRepository()
-    snippet = repo.get(name)
-    program_name = snippet.generated_program_name
-    if not snippet.header.is_executable:
-        raise ValueError(f"Can only render programs for executable snippets, but {name} is not executable")
-    generated_programs_dir = ROOT_FOLDER / "generated-programs"
-    program_dir = generated_programs_dir / program_name
-
-    print(f"Deleting {program_dir}...")
-    shutil.rmtree(program_dir.as_posix())
-
-    print(f"Rendering {program_name}")
-    folder_path = generated_programs_dir / name
-    run_and_check(["cargo", "new", name], cwd=generated_programs_dir)
-    run_and_check(["cargo", "build"], cwd=folder_path)
-
-    render_descriptions = repo.render_snippet(snippet, strip_presentation_commands=True)
-    for desc in render_descriptions:
-        path = folder_path / desc.file
-        path.write_text(desc.text)
-    return folder_path
-
-
-def render_programs() -> list[Path]:
-    repo = SnippetRepository()
-    executable_snippets = [s for s in repo.snippets.values() if s.header.is_executable]
-    generated_programs = []
-    for snippet in executable_snippets:
-        generated_programs.append(render_program(snippet.name))
-    return generated_programs
-
-
 def _test_render_snippets():
     repo = SnippetRepository()
     print(repo.render_snippet(repo.get("listing1")))
     print(repo.render_snippet(repo.get("listing2")))
-
-
-def _test_executables():
-    generated_program_paths = render_programs()
-    for generated_program_path in generated_program_paths:
-        return_code, output = run_and_capture_output(["cargo", "run"], cwd=generated_program_path)
-        print(return_code, output)
-
-
-def _test_executable(name: str):
-    generated_program_path = render_program(name)
-    return_code, output = run_and_capture_output(["cargo", "run"], cwd=generated_program_path)
-    print(return_code, output)
 
 
 class TestRenderer:
@@ -738,3 +760,74 @@ lang: rust
             ]
             renderer = DocumentRenderer(sections)
             assert renderer.render() == vector.expected_output
+
+    def test_use_highlight_shortcode__show(self):
+        sections = [
+            TextSection(text="First text section\n"),
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                    ),
+                    snippet_name="main",
+                    content=[
+                        EmbedText(text="Code section"),
+                    ],
+                )
+            ),
+            CommandSection(
+                command=ShowCommand("main")
+            ),
+            TextSection(text="Second text section\n"),
+        ]
+        renderer = DocumentRenderer(sections)
+        assert renderer.render() == (
+            'First text section\n'
+            'Top-level show, _src/main.rs_\n'
+            '{{<highlight rust "linenos=table,linenostart=25">}}\n'
+            'Code section\n'
+            '{{</highlight>}}\n'
+            'Second text section\n'
+        )
+
+    def test_use_highlight_shortcode__update(self):
+        sections = [
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                    ),
+                    snippet_name="snippet1",
+                    content=[
+                        EmbedText("Top-level line 1\n"),
+                        EmbedText("Top-level line 2\n"),
+                        EmbedSnippet("snippet2"),
+                        EmbedText("Here's another line")
+                    ]
+                )
+            ),
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                    ),
+                    snippet_name="snippet2",
+                    content=[EmbedText("Original content")],
+                )
+            ),
+            CommandSection(
+                command=UpdateCommand(
+                    snippet_name="snippet2",
+                    update_data="Updated content\n",
+                )
+            )
+        ]
+        renderer = DocumentRenderer(sections)
+        assert renderer.render() == (
+            'Update, \n'
+            '{{<highlight rust "linenos=table,hl_lines=1-2,linenostart=25">}}\n'
+            'Top-level line 2\n'
+            "Updated content\n"
+            "\n"
+            '{{</highlight>}}\n'
+        )

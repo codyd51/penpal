@@ -1,7 +1,5 @@
 from penpal.env import CHAPTER_1_ROOT, ROOT_FOLDER
 from penpal.render import (
-    render_programs,
-    render_program,
     parse_document_text, DocumentRenderer,
 )
 from penpal.shell_utils import run_and_check, run_and_capture_output

@@ -7,7 +7,7 @@ tags = []
 
 Let's get started.
 
-```shell
+```text
 $ cargo new dns_resolver --bin
 $ cd dns_resolver
 ```
@@ -73,7 +73,7 @@ lang: rust
 
 When we try to run this, the operating system rejects our request:
 
-```shell
+```text
 $ cargo run dns_resolver
    Compiling dns_resolver v0.1.0 
     Finished dev [unoptimized + debuginfo] target(s) in 0.70s
@@ -95,7 +95,7 @@ Instead, while we're building things out, let's leave our system's DNS configura
 }}
 {{generate}}
 
-```shell
+```text
 $ cargo run dns_resolver
    Compiling dns_resolver v0.1.0 
     Finished dev [unoptimized + debuginfo] target(s) in 0.70s
@@ -113,7 +113,7 @@ To send a DNS packet to our server, we'll use `dig`, a standard command line uti
 
 For now, let's just send a request and see what happens. Since we haven't reconfigured our system's DNS, this request will be sent to whatever DNS resolver is already set up.
 
-```shell
+```text
 $ dig google.com A
 
 ; <<>> DiG 9.10.6 <<>> google.com A
@@ -138,7 +138,7 @@ google.com.		128	IN	A	142.250.200.14
 
 Cool! `dig` sent a query for `google.com` to the resolver, and the resolver responded with the `A` records where this resource can be found. Down at the bottom of the output, we can see information about which resolver `dig` spoke to: in my case, a resolver hosted at `1.1.1.1`. Let's configure `dig` to talk to our nascent DNS resolver instead.
 
-```shell
+```text
 $ dig @0.0.0.0 -p 53846 google.com
 
 ; <<>> DiG 9.10.6 <<>> @0.0.0.0 -p 53846 google.com
@@ -376,11 +376,11 @@ use packet_header_layout::DnsPacketHeaderRaw;
 }}
 {{generate}}
 
-```shell
+```text
 $ dig @0.0.0.0 -p 51456 google.com A
 ```
 
-```shell
+```text
 $ cargo run dns_resolver
     Finished dev [unoptimized + debuginfo] target(s) in 0.05s
      Running `target/debug/dns_resolver dns_resolver`
@@ -444,6 +444,7 @@ impl TryFrom<usize> for DnsOpcode {
         }
     }
 }
+
 }}
 {{show dns_opcode_try_from}}
 
@@ -452,6 +453,7 @@ Let's flesh out this same concept for the rest of the header fields, by introduc
 {{define packet_header_fields
 lang: rust
 ###
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct ResponseFields {
     is_packet_an_authoritative_answer: bool,

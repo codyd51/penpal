@@ -7,7 +7,7 @@ tags = []
 
 Let's get started.
 
-```shell
+```text
 $ cargo new dns_resolver --bin
 $ cd dns_resolver
 ```
@@ -27,7 +27,7 @@ To get us started, let's _wait_ for DNS queries to come in.
 
 
 Top-level show, _src/main.rs_
-```rust
+{{<highlight rust "linenos=inline,linenostart=25">}}
 use std::net::UdpSocket;
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
@@ -43,11 +43,11 @@ fn main() {
 
         println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");    }
 }
-```
+{{</highlight>}}
 
 When we try to run this, the operating system rejects our request:
 
-```shell
+```text
 $ cargo run dns_resolver
    Compiling dns_resolver v0.1.0 
     Finished dev [unoptimized + debuginfo] target(s) in 0.70s
@@ -63,16 +63,18 @@ We're also not quite ready to handle all of our system's "real" DNS traffic, any
 Instead, while we're building things out, let's leave our system's DNS configuration alone, and build our server off to the side. We'll send ourselves controlled test packets to ensure everything is working as expected, without needing to worry about all the complexities of real-world traffic upfront.
 
 Update, _src/main.rs_
-```rust
+{{<highlight rust "linenos=inline,hl_lines=4-6,linenostart=25">}}
+const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
+
 fn main() {
-{{< rawhtml >}}<div style="background-color: #4a4a00">    let socket = UdpSocket::bind("0.0.0.0:0")
+    let socket = UdpSocket::bind("0.0.0.0:0")
         .expect("Failed to bind to a local socket");
-    println!("Bound to {socket:?}");</div>{{< /rawhtml >}}
+    println!("Bound to {socket:?}");
     let mut receive_packet_buf = [0; MAX_DNS_UDP_PACKET_SIZE];
     println!("Awaiting incoming packets...");
-```
+{{</highlight>}}
 
-```shell
+```text
 $ cargo run dns_resolver
    Compiling dns_resolver v0.1.0 
     Finished dev [unoptimized + debuginfo] target(s) in 0.70s
@@ -90,7 +92,7 @@ To send a DNS packet to our server, we'll use `dig`, a standard command line uti
 
 For now, let's just send a request and see what happens. Since we haven't reconfigured our system's DNS, this request will be sent to whatever DNS resolver is already set up.
 
-```shell
+```text
 $ dig google.com A
 
 ; <<>> DiG 9.10.6 <<>> google.com A
@@ -115,7 +117,7 @@ google.com.		128	IN	A	142.250.200.14
 
 Cool! `dig` sent a query for `google.com` to the resolver, and the resolver responded with the `A` records where this resource can be found. Down at the bottom of the output, we can see information about which resolver `dig` spoke to: in my case, a resolver hosted at `1.1.1.1`. Let's configure `dig` to talk to our nascent DNS resolver instead.
 
-```shell
+```text
 $ dig @0.0.0.0 -p 53846 google.com
 
 ; <<>> DiG 9.10.6 <<>> @0.0.0.0 -p 53846 google.com
@@ -214,28 +216,30 @@ To get started, let's add `bitvec` to our crate's dependencies.
 
 
 
-Child contextual show, _Cargo.toml_
-```rust
+Child contextual show, `cargo_toml_dependencies`
+
+{{<highlight toml "linenos=inline,hl_lines=4-5,linenostart=25">}}
+version = "0.1.0"
 edition = "2021"
 
-{{< rawhtml >}}<div style="background-color: #4a4a00">[dependencies]
-bitvec = "1"</div>{{< /rawhtml >}}
-```
+[dependencies]
+bitvec = "1"
+{{</highlight>}}
 
 Now, let's start modeling the DNS header format! Make a new file, `packet_header_layout.rs`.
 
 Update, _src/main.rs_
-```rust
-use std::net::UdpSocket;{{< rawhtml >}}<div style="background-color: #4a4a00">
-mod packet_header_layout;</div>{{< /rawhtml >}}
+{{<highlight rust "linenos=inline,hl_lines=1-2,linenostart=25">}}
+use std::net::UdpSocket;
+mod packet_header_layout;
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
 
-```
+{{</highlight>}}
 
 
 
 Top-level show, _src/packet_header_layout.rs_
-```rust
+{{<highlight rust "linenos=inline,linenostart=25">}}
 use std::mem;
 use std::ops::Range;
 
@@ -244,14 +248,15 @@ use bitvec::prelude::*;
 #[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
 
-```
+{{</highlight>}}
 
 We'll define a 'raw' buffer type that allows bit-level access atop the over-the-wire DNS packet. Let's define some groundwork for interacting with the different fields encoded within this buffer.
 
 Update, _src/packet_header_layout.rs_
-```rust
+{{<highlight rust "linenos=inline,hl_lines=3-67,linenostart=25">}}
+#[derive(Debug)]
 pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
-{{< rawhtml >}}<div style="background-color: #4a4a00">impl DnsPacketHeaderRaw {
+impl DnsPacketHeaderRaw {
     pub(crate) const HEADER_SIZE: usize = mem::size_of::<Self>();
 
     fn read_u16_at_index(&self, idx: usize) -> u16 {
@@ -315,25 +320,26 @@ pub(crate) struct DnsPacketHeaderRaw(pub(crate) BitArray<[u16; 6], Lsb0>);
     pub(crate) fn response_code(&self) -> u16 {
         self.read_bit_range_from_flags(12..16)
     }
-}</div>{{< /rawhtml >}}
-```
+}
+{{</highlight>}}
 
 Let's try it out with the packets `dig` sends us!
 
 Update, _src/main.rs_
-```rust
-{{< rawhtml >}}<div style="background-color: #4a4a00">use std::net::UdpSocket;
+{{<highlight rust "linenos=inline,linenostart=25">}}
+use std::net::UdpSocket;
 
-use packet_header_layout::DnsPacketHeaderRaw;</div>{{< /rawhtml >}}
+use packet_header_layout::DnsPacketHeaderRaw;
 mod packet_header_layout;
 const MAX_DNS_UDP_PACKET_SIZE: usize = 512;
-```
+{{</highlight>}}
 
 Update, _src/main.rs_
-```rust
+{{<highlight rust "linenos=inline,hl_lines=4-13,linenostart=25">}}
+            .recv_from(&mut receive_packet_buf)
             .expect("Failed to read from the socket");
 
-{{< rawhtml >}}<div style="background-color: #4a4a00">        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
+        println!("We've received a DNS query of {byte_count_received} bytes from {sender_addr:?}");
         let (header_bytes, _body_bytes) = receive_packet_buf.split_at(DnsPacketHeaderRaw::HEADER_SIZE);
         let header_raw = unsafe { &*(header_bytes.as_ptr() as *const DnsPacketHeaderRaw) };
         println!("\tPacket ID:                {:04x}", header_raw.identifier());
@@ -342,14 +348,14 @@ Update, _src/main.rs_
         println!("\tQuestion record count:    {:04}", header_raw.question_record_count());
         println!("\tAnswer record count:      {:04}", header_raw.answer_record_count());
         println!("\tAuthority record count:   {:04}", header_raw.authority_record_count());
-        println!("\tAdditional record count:  {:04}", header_raw.additional_record_count());</div>{{< /rawhtml >}}
-```
+        println!("\tAdditional record count:  {:04}", header_raw.additional_record_count());
+{{</highlight>}}
 
-```shell
+```text
 $ dig @0.0.0.0 -p 51456 google.com A
 ```
 
-```shell
+```text
 $ cargo run dns_resolver
     Finished dev [unoptimized + debuginfo] target(s) in 0.05s
      Running `target/debug/dns_resolver dns_resolver`
@@ -379,7 +385,7 @@ match header.opcode {
 
 
 Top-level show, _src/packet_header.rs_
-```rust
+{{<highlight rust "linenos=inline,linenostart=25">}}
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum DnsOpcode {
     Query = 0,
@@ -387,14 +393,16 @@ pub(crate) enum DnsOpcode {
     Notify = 4,
 }
 
-```
+{{</highlight>}}
 
 Let's define conversions from the 'raw' bit-fields stored in the on-the-wire packet to our strongly typed higher-level representations.
 
-Child contextual show, _src/packet_header.rs_
-```rust
+Child contextual show, `dns_opcode_try_from`
+
+{{<highlight rust "linenos=inline,hl_lines=3-16,linenostart=25">}}
+    Notify = 4,
 }
-{{< rawhtml >}}<div style="background-color: #4a4a00">
+
 impl TryFrom<usize> for DnsOpcode {
     type Error = usize;
 
@@ -406,14 +414,19 @@ impl TryFrom<usize> for DnsOpcode {
             _ => Err(value),
         }
     }
-}</div>{{< /rawhtml >}}
-```
+}
+
+{{</highlight>}}
 
 Let's flesh out this same concept for the rest of the header fields, by introducing a layer in between the 'raw' header and another representation which isn't constrained by the bitwise representation. 
 
-Child contextual show, _src/packet_header.rs_
-```rust
-}{{< rawhtml >}}<div style="background-color: #4a4a00">#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+Child contextual show, `packet_header_fields`
+
+{{<highlight rust "linenos=inline,hl_lines=3-29,linenostart=25">}}
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct ResponseFields {
     is_packet_an_authoritative_answer: bool,
     is_recursion_available: bool,
@@ -438,16 +451,18 @@ impl ResponseFields {
 pub(crate) enum PacketDirection {
     Query,
     Response(ResponseFields),
-}</div>{{< /rawhtml >}}
-```
+}
+{{</highlight>}}
 
 Certain fields are always present in the packet header on-the-wire, such as the `is_packet_an_authoritative_answer` flag. However, these fields are _only valid_ when the packet is a response! Queries still need to send the storage to contain them, but their value will be ignored. We're forced to model these fields even when dealing with a query in the _raw_ representation, but we can leverage the power of the type system by using a sum type to express that these fields are _only present_ when we're dealing with a `PacketDirection::Response()`. 
 
 Let's define the header itself.
 
-Child contextual show, _src/packet_header.rs_
-```rust
-}{{< rawhtml >}}<div style="background-color: #4a4a00">
+Child contextual show, `define_packet_header`
+
+{{<highlight rust "linenos=inline,hl_lines=2-17,linenostart=25">}}
+    Response(ResponseFields),
+}
 #[derive(Debug, Clone)]
 pub(crate) struct DnsPacketHeader {
     pub(crate) identifier: usize,
@@ -462,14 +477,16 @@ pub(crate) struct DnsPacketHeader {
     pub(crate) answer_record_count: usize,
     pub(crate) authority_record_count: usize,
     pub(crate) additional_record_count: usize,
-}</div>{{< /rawhtml >}}
-```
+}
+{{</highlight>}}
 
 Finally, let's build a utility to convert the bitwise representation into the convenient representation.
 
-Child contextual show, _src/packet_header.rs_
-```rust
-}{{< rawhtml >}}<div style="background-color: #4a4a00">
+Child contextual show, `packet_header_from_raw`
+
+{{<highlight rust "linenos=inline,hl_lines=2-30,linenostart=25">}}
+    pub(crate) additional_record_count: usize,
+}
 impl From<&DnsPacketHeaderRaw> for DnsPacketHeader {
     fn from(raw: &DnsPacketHeaderRaw) -> Self {
         Self {
@@ -497,8 +514,8 @@ impl From<&DnsPacketHeaderRaw> for DnsPacketHeader {
             additional_record_count: raw.additional_record_count(),
         }
     }
-}</div>{{< /rawhtml >}}
-```
+}
+{{</highlight>}}
 
 //We're now going to need some way to interpret the bytes we're receiving over-the-wire 
 
