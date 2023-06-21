@@ -369,7 +369,7 @@ def render_snippet(
             f"\n{{{{<highlight {snippet.header.lang.value} \"" 
             f"linenos=inline" 
             f"{highlight_lines_opt}"
-            f",linenostart=25\""
+            f",linenostart={first_displayed_line_idx}\""
             ">}}"
         )
         # Wrap the output in the syntax highlighting shortcode
