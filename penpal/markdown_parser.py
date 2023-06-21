@@ -196,7 +196,7 @@ class MarkdownParser:
 
         return UpdateCommand(
             snippet_name=snippet_name.value,
-            update_data="".join([t.value for t in update_data]),
+            update_data="".join([t.value for t in update_data]) + '\n',
         )
 
     def parse_command__show(self) -> ShowCommand:
