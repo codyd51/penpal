@@ -191,7 +191,6 @@ class MarkdownParser:
         snippet_name = self.expect(TokenType.Word)
         self.expect(TokenType.Newline)
         update_data = self.read_tokens_until_sequence(self.END_MULTI_LINE_COMMAND_SEQ)
-        self.expect(TokenType.Newline)
         self.match_command_close()
         print(f"Parsing update, snippet name {snippet_name} {update_data}")
 

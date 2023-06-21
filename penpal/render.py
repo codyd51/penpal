@@ -49,7 +49,7 @@ class DocumentRenderer:
         # Show the snippet 'in-context'
         production_rule_idx = find_embedded_snippet_in_production_rules(parent, snippet_name)
         rendered_parent = render_snippet(
-            self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, production_rule_idx
+            self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, None
         )
 
         context_start, context_end = self._find_context_boundaries(
@@ -130,10 +130,53 @@ class DocumentRenderer:
             line_idx = len(ordered_lines) - 1 - i
             if len(line):
                 context_line_count_with_meaningful_content += 1
+                # Move back our context window to the start of this line
+                start_context_at_line_idx = line_idx
                 if context_line_count_with_meaningful_content == 2:
-                    start_context_at_line_idx = line_idx
+                    # We've collected enough context lines
                     break
         return ordered_lines[start_context_at_line_idx][0]
+
+    @staticmethod
+    def _find_context_end(
+        text: str,
+        highlight_end: StringIndex,
+    ) -> StringIndex:
+        lines = []
+        current_line_chars = []
+        remaining_lines_to_search = 3
+        for i, ch in enumerate(text[highlight_end:]):
+            if ch == "\n":
+                lines.append((highlight_end + i, "".join(current_line_chars)))
+                current_line_chars = []
+                remaining_lines_to_search -= 1
+                if remaining_lines_to_search == -1:
+                    break
+            else:
+                current_line_chars.append(ch)
+
+        if not len(lines):
+            # There's no more content after the highlight, so the context ends with the highlight
+            return highlight_end
+
+        # We might not have ended in a newline, and will still have characters in our buffer. Create a line for them now
+        last_line = lines[-1]
+        last_tracked_char_idx = last_line[0] + len(last_line[1])
+        if len(current_line_chars):
+            lines.append((last_tracked_char_idx, "".join(current_line_chars)))
+
+        # Select the second line that has meaningful text
+        context_line_count_with_meaningful_content = 0
+        end_content_at_line_idx = len(lines) - 1
+        for line_idx, (line_start_char_idx, line) in enumerate(lines):
+            if len(line):
+                context_line_count_with_meaningful_content += 1
+                # Increase our context window to the start of this line
+                end_content_at_line_idx = line_idx
+                if context_line_count_with_meaningful_content == 2:
+                    # We've collected enough context lines
+                    break
+        return lines[end_content_at_line_idx][0]
 
     @staticmethod
     def _find_context_boundaries(
@@ -149,17 +192,9 @@ class DocumentRenderer:
             if highlight_rule_idx < (len(parent_snippet.production_rules) - 1)
             else len(rendered_parent_text)
         )
-        context_end = highlight_end
 
         context_start = DocumentRenderer._find_context_start(rendered_parent_text, highlight_start)
-
-        newline_counter = 0
-        for i, ch in enumerate(rendered_parent_text[highlight_end:]):
-            if ch == "\n":
-                newline_counter += 1
-            if newline_counter == 3:
-                context_end = highlight_end + i
-                break
+        context_end = DocumentRenderer._find_context_end(rendered_parent_text, highlight_end)
 
         return context_start, context_end
 
@@ -181,7 +216,7 @@ class DocumentRenderer:
         parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         self.rendered_snippets.append(parent_snippet)
         out += "Update, "
-        out += f"_{parent_snippet.header.file}_"
+        out += f"_{parent_snippet.header.file}_ (_{snippet_name}_)"
         out += self.render_snippet_in_context_of_parent(snippet_name, parent_snippet)
 
         return out
@@ -300,15 +335,19 @@ def render_snippet(
 
         if should_highlight_this_production:
             # End the styling tag
-            #out += "</div>"
-            #out += "{{< /rawhtml >}}"
-            highlight_end_line = out.count("\n")
+            # Subtract 1 because the snippet should have ended in a newline,
+            # and we don't want to highlight the line following it.
+            highlight_end_line = out.count("\n") - 1
 
     # Trim according to the input
-    highlight_lines_slide = 0
+    first_displayed_line_idx = 0
     if only_render_range:
+        # Currently this is in the context of the 'local' snippet
+        # Instead of stopping when we get to the local context, we need to stop when we get to the highlight
+        # trimmed_start = out[:only_render_range[0]]
         trimmed_start = out[:only_render_range[0]]
-        highlight_lines_slide = trimmed_start.count("\n") - 1
+        highlight_lines_slide = trimmed_start.count("\n")
+        first_displayed_line_idx = trimmed_start.count("\n")
         highlight_start_line -= highlight_lines_slide
         highlight_end_line -= highlight_lines_slide
 
@@ -318,13 +357,14 @@ def render_snippet(
     if fence_configuration == CodeBlockFenceConfiguration.IncludeFence:
         # Now that we know where the highlight goes, we can add the annotation to the start of the code block
         highlight_lines_opt = ""
-        if highlight_snippet_idx:
+        if highlight_snippet_idx is not None:
             if highlight_start_line is None or highlight_end_line is None:
                 raise ValueError("Expected to identify highlight boundaries")
 
             highlight_range = (highlight_start_line, highlight_end_line)
 
-            highlight_lines_opt = f",hl_lines={highlight_start_line}-{highlight_end_line}"
+            # These line numbers are 1-indexed in Hugo
+            highlight_lines_opt = f",hl_lines={highlight_start_line + 1}-{highlight_end_line + 1}"
         highlight_annotation = (
             f"\n{{{{<highlight {snippet.header.lang.value} \"" 
             f"linenos=inline" 
@@ -332,12 +372,10 @@ def render_snippet(
             f",linenostart=25\""
             ">}}"
         )
+        # Wrap the output in the syntax highlighting shortcode
         out = f"{highlight_annotation}\n{out}"
         out += "\n{{</highlight>}}\n"
         print(out)
-        # Close the code block
-        # out += "\n```\n"
-        # out += f"{{</ highlight >}}"
 
     return RenderedSnippet(
         text=out,
@@ -689,14 +727,14 @@ lang: rust
                     EmbedText("Here's another line")
                 ],
                 expected_output=(
-                    '_src/main.rs_\n'
-                    '```rust\n'
+                    'Update, _src/main.rs_ (_snippet2_)\n'
+                    '{{<highlight rust "linenos=inline,hl_lines=3-4,linenostart=0">}}\n'
                     'Top-level snippet text\n'
                     '\n'
-                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated '
-                    'content</div>{{< /rawhtml >}}\n'
-                    '```\n'
-                ),
+                    'Updated content\n'
+                    'Here\'s another line\n'
+                    '{{</highlight>}}\n'
+                )
             ),
             TestVector(
                 define_snippet1_commands=[
@@ -705,12 +743,12 @@ lang: rust
                     EmbedText("Here's another line")
                 ],
                 expected_output=(
-                    '_src/main.rs_\n'
-                    '```rust\n'
+                    'Update, _src/main.rs_ (_snippet2_)\n'
+                    '{{<highlight rust "linenos=inline,hl_lines=2-3,linenostart=0">}}\n'
                     'Top-level snippet text\n'
-                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated '
-                    'content</div>{{< /rawhtml >}}\n'
-                    '```\n'
+                    'Updated content\n'
+                    'Here\'s another line\n'
+                    '{{</highlight>}}\n'
                 ),
             ),
             TestVector(
@@ -722,11 +760,13 @@ lang: rust
                     EmbedText("Here's another line")
                 ],
                 expected_output=(
-                    '_src/main.rs_\n'
-                    '```rust\n'
+                    'Update, _src/main.rs_ (_snippet2_)\n'
+                    '{{<highlight rust "linenos=inline,hl_lines=3-4,linenostart=1">}}\n'
+                    'Line2\n'
                     'Line3\n'
-                    '{{< rawhtml >}}<div style="background-color: #4a4a00">Updated content</div>{{< /rawhtml >}}\n'
-                    '```\n'
+                    'Updated content\n'
+                    'Here\'s another line\n'
+                    '{{</highlight>}}\n'
                 ),
             ),
         ]
@@ -754,7 +794,7 @@ lang: rust
                 CommandSection(
                     command=UpdateCommand(
                         snippet_name="snippet2",
-                        update_data="Updated content",
+                        update_data="Updated content\n",
                     )
                 )
             ]
@@ -824,10 +864,58 @@ lang: rust
         ]
         renderer = DocumentRenderer(sections)
         assert renderer.render() == (
-            'Update, \n'
-            '{{<highlight rust "linenos=table,hl_lines=1-2,linenostart=25">}}\n'
+            'Update, _src/main.rs_\n'
+            '{{<highlight rust "linenos=inline,hl_lines=2-3,linenostart=25">}}\n'
+            'Top-level line 1\n'
             'Top-level line 2\n'
             "Updated content\n"
             "\n"
+            '{{</highlight>}}\n'
+        )
+
+    def test_shows_context(self):
+        sections = [
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST,
+                        is_executable=False,
+                        dependencies=[],
+                        file='src/main.rs'
+                    ),
+                    snippet_name='snip1',
+                    content=[
+                        EmbedText(text='line1\n'),
+                        EmbedSnippet(snippet_name='snip2'),
+                        EmbedText(text='Line4\n')
+                    ]
+                )
+            ),
+            TextSection(text='\n'),
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST,
+                        is_executable=False,
+                        dependencies=[],
+                        file=None
+                    ),
+                    snippet_name='snip2',
+                    content=[
+                        EmbedText(text='line2\n')
+                    ]
+                )
+            ),
+            CommandSection(command=ShowCommand(snippet_name='snip2'))
+        ]
+        renderer = DocumentRenderer(sections)
+        assert renderer.render() == (
+            '\n'
+            'Child contextual show, `snip2`\n'
+            '\n'
+            '{{<highlight rust "linenos=inline,hl_lines=2-3,linenostart=0">}}\n'
+            'line1\n'
+            'line2\n'
+            '\n'
             '{{</highlight>}}\n'
         )
