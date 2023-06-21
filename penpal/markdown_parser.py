@@ -127,7 +127,7 @@ class MarkdownParser:
         while True:
             # Handle nested commands
             tokens_before_nested_command = self.read_tokens_until_any_sequence(
-                [self.BEGIN_COMMAND_SEQ, self.END_MULTI_LINE_COMMAND_SEQ, [*self.END_COMMAND_SEQ]]
+                [self.BEGIN_COMMAND_SEQ, [*self.END_COMMAND_SEQ], self.END_MULTI_LINE_COMMAND_SEQ]
             )
             # We might immediately have an embed-snippet rule, so it's not a guarantee that there will be text before
             # the first command.
