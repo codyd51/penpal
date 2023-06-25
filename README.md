@@ -42,6 +42,7 @@ fn main() {
     println!("Hello, world!");
 }
 ```
+```
 
 We can then define some of the snippets we mentioned earlier:
 
