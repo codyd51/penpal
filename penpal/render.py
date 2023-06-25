@@ -43,7 +43,11 @@ class DocumentRenderer:
     def render_text_section(text_section: TextSection) -> str:
         return text_section.text
 
-    def render_snippet_in_context_of_parent(self, snippet_name: SnippetName, parent: InlineSnippet) -> str:
+    def render_snippet_in_context_of_parent(
+        self,
+        snippet_name: SnippetName,
+        parent: InlineSnippet,
+    ) -> str:
         out = str()
         # We're defining a snippet that was used in another parent snippet
         # Show the snippet 'in-context'
@@ -84,14 +88,15 @@ class DocumentRenderer:
         self.rendered_snippets.append(snippet)
 
         maybe_parent = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        # maybe_root = find_root_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         if not maybe_parent:
             # This is a top-level snippet
             file_name = snippet.header.file
             rendered_snippet = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
-            out += f"Top-level show, _{file_name}_"
+            #out += f"_Create `{file_name}`_\n"
             out += rendered_snippet.text
         else:
-            out += f"Child contextual show, `{snippet_name}`\n"
+            #out += f"_Update `{maybe_parent.header.file}`_\n"
             out += self.render_snippet_in_context_of_parent(snippet_name, maybe_parent)
 
         return out
@@ -213,10 +218,10 @@ class DocumentRenderer:
         # another snippet.
         # Therefore, we need to iterate the snippets to find the last time this snippet was used, to
         # be able to show where the update happens in the context of the source code.
-        parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        # parent_snippet = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        parent_snippet = find_root_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         self.rendered_snippets.append(parent_snippet)
-        out += "Update, "
-        out += f"_{parent_snippet.header.file}_ (_{snippet_name}_)"
+        # out += f"_Update `{parent_snippet.header.file}`_\n"
         out += self.render_snippet_in_context_of_parent(snippet_name, parent_snippet)
 
         return out
@@ -365,16 +370,29 @@ def render_snippet(
 
             # These line numbers are 1-indexed in Hugo
             highlight_lines_opt = f",hl_lines={highlight_start_line + 1}-{highlight_end_line + 1}"
-        highlight_annotation = (
-            f"\n{{{{<highlight {snippet.header.lang.value} \"" 
-            f"linenos=inline" 
-            f"{highlight_lines_opt}"
-            f",linenostart={first_displayed_line_idx}\""
-            ">}}"
-        )
-        # Wrap the output in the syntax highlighting shortcode
-        out = f"{highlight_annotation}\n{out}"
-        out += "\n{{</highlight>}}\n"
+
+        if False:
+            highlight_annotation = (
+                f"\n{{{{<highlight {snippet.header.lang.value} \"" 
+                f"linenos=inline" 
+                f"{highlight_lines_opt}"
+                f",linenostart={first_displayed_line_idx}\""
+                ">}}"
+            )
+            # Wrap the output in the syntax highlighting shortcode
+            out = f"{highlight_annotation}\n{out}"
+            out += "\n{{</highlight>}}\n"
+        else:
+            options = (
+                f"linenos=inline"
+                f"{highlight_lines_opt}"
+                f",linenostart={first_displayed_line_idx}"
+            )
+            highlight_annotation = (
+                f"{{{{<named-code-block lang=\"{snippet.header.lang.value}\" filename=\"{snippet.header.file}\" options=\"{options}\">}}}}"
+            )
+            out = f"{highlight_annotation}\n{out}\n{{{{</named-code-block>}}}}\n"
+            pass
         print(out)
 
     return RenderedSnippet(
@@ -404,6 +422,24 @@ def find_parent_snippet(
                     return parent_snippet
 
     return None
+
+
+def find_root_parent_snippet(
+    defined_snippets: dict[SnippetName, InlineSnippet],
+    recently_displayed_snippets: list[InlineSnippet],
+    this_snippet_name: SnippetName,
+) -> InlineSnippet | None:
+    maybe_parent = find_parent_snippet(defined_snippets, recently_displayed_snippets, this_snippet_name)
+    if not maybe_parent:
+        return None
+
+    while True:
+        if maybe_parent:
+            maybe_next_parent = find_parent_snippet(defined_snippets, recently_displayed_snippets, maybe_parent.name)
+            if not maybe_next_parent:
+                break
+            maybe_parent = maybe_next_parent
+    return maybe_parent
 
 
 def find_embedded_snippet_in_production_rules(parent_snippet: InlineSnippet, embedded_snippet_name: SnippetName) -> int:
