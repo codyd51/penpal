@@ -80,3 +80,64 @@ lang: rust
             CommandSection(command=ShowCommand(snippet_name="main_runloop")),
             TextSection(text="\n"),
         ]
+
+    def test_back_to_back_snippets(self):
+        src = """{{define snip1
+file: src/main.rs
+lang: rust
+###
+{{snip2}}
+{{snip3}}
+{{snip4}}
+}}
+{{show snip1}}
+
+{{define snip2
+lang: rust
+###
+snip2
+}}
+{{show snip2}}
+
+{{define snip3
+lang: rust
+###
+snip3
+}}
+{{show snip3}}
+"""
+        sections = parse_document_text(src)
+        assert sections == [
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(
+                        lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file="src/main.rs"
+                    ),
+                    snippet_name="snip1",
+                    content=[
+                        EmbedSnippet(snippet_name="snip2"),
+                        EmbedSnippet(snippet_name="snip3"),
+                        EmbedSnippet(snippet_name="snip4"),
+                    ],
+                ),
+            ),
+            CommandSection(command=ShowCommand(snippet_name="snip1")),
+            TextSection(text="\n"),
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
+                    snippet_name="snip2",
+                    content=[EmbedText(text="snip2\n")],
+                )
+            ),
+            CommandSection(command=ShowCommand(snippet_name="snip2")),
+            TextSection(text="\n"),
+            CommandSection(
+                command=DefineSnippet(
+                    header=SnippetHeader(lang=SnippetLanguage.RUST, is_executable=False, dependencies=[], file=None),
+                    snippet_name="snip3",
+                    content=[EmbedText(text="snip3\n")],
+                )
+            ),
+            CommandSection(command=ShowCommand(snippet_name="snip3")),
+        ]
