@@ -77,8 +77,16 @@ Command = (
 
 
 class MarkdownParser:
-    BEGIN_COMMAND_SEQ = [TokenType.LeftBrace, TokenType.LeftBrace]
-    END_COMMAND_SEQ = [TokenType.RightBrace, TokenType.RightBrace]
+    #BEGIN_COMMAND_SEQ = [TokenType.LeftBrace, TokenType.LeftBrace]
+    #END_COMMAND_SEQ = [TokenType.RightBrace, TokenType.RightBrace]
+
+    # These conflict with Vec<Vec<usize>> (at the end)
+    #BEGIN_COMMAND_SEQ = [TokenType.LeftAngle, TokenType.LeftAngle]
+    #END_COMMAND_SEQ = [TokenType.RightAngle, TokenType.RightAngle]
+
+    # Chose to be unlikely to conflict
+    BEGIN_COMMAND_SEQ = [TokenType.Dollar, TokenType.Bang]
+    END_COMMAND_SEQ = [TokenType.Bang, TokenType.Dollar]
     END_MULTI_LINE_COMMAND_SEQ = [TokenType.Newline, *END_COMMAND_SEQ]
 
     def __init__(self, text: str) -> None:
