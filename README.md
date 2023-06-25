@@ -41,7 +41,7 @@ This will cause the snippet at the top to be rendered to markdown like so:
 fn main() {
     println!("Hello, world!");
 }
-```
+\```
 ```
 
 We can then define some of the snippets we mentioned earlier:
