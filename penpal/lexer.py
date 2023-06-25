@@ -6,14 +6,18 @@ Cursor = int
 
 
 class TokenType(Enum):
-    EOF = (auto(),)
-    Word = (auto(),)
-    Comma = (auto(),)
-    LeftBrace = (auto(),)
-    RightBrace = (auto(),)
-    Space = (auto(),)
-    Newline = (auto(),)
-    Hash = (auto(),)
+    EOF = auto()
+    Word = auto()
+    Comma = auto()
+    LeftBrace = auto()
+    RightBrace = auto()
+    LeftAngle = auto()
+    RightAngle = auto()
+    Space = auto()
+    Newline = auto()
+    Hash = auto()
+    Dollar = auto()
+    Bang = auto()
 
     @classmethod
     def try_from_str(cls, s: str) -> Self | None:
@@ -21,9 +25,13 @@ class TokenType(Enum):
             ",": TokenType.Comma,
             "{": TokenType.LeftBrace,
             "}": TokenType.RightBrace,
+            "<": TokenType.LeftAngle,
+            ">": TokenType.RightAngle,
             " ": TokenType.Space,
             "\n": TokenType.Newline,
             "#": TokenType.Hash,
+            "$": TokenType.Dollar,
+            "!": TokenType.Bang,
         }
         if s in mapping:
             return mapping[s]
