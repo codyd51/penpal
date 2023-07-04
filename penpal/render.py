@@ -47,13 +47,15 @@ class DocumentRenderer:
         self,
         snippet_name: SnippetName,
         parent: InlineSnippet,
+        maybe_root: InlineSnippet | None = None,
+        maybe_url: str | None = None,
     ) -> str:
         out = str()
         # We're defining a snippet that was used in another parent snippet
         # Show the snippet 'in-context'
         production_rule_idx = find_embedded_snippet_in_production_rules(parent, snippet_name)
         rendered_parent = render_snippet(
-            self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, None
+            self.defined_snippets, parent, CodeBlockFenceConfiguration.ExcludeFence, None, maybe_root=maybe_root
         )
 
         context_start, context_end = self._find_context_boundaries(
@@ -69,10 +71,12 @@ class DocumentRenderer:
             parent,
             CodeBlockFenceConfiguration.IncludeFence,
             production_rule_idx,
-            (context_start, context_end)
+            (context_start, context_end),
+            maybe_root=maybe_root,
+            maybe_url=maybe_url,
         )
 
-        file_name = parent.header.file
+        # file_name = maybe_root.header.file
         #out += f"_{file_name}_\n"
         #out += f"```rust\n"
         # out += rendered_parent.text[context_start:context_end]
@@ -88,16 +92,16 @@ class DocumentRenderer:
         self.rendered_snippets.append(snippet)
 
         maybe_parent = find_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
-        # maybe_root = find_root_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
+        maybe_root = find_root_parent_snippet(self.defined_snippets, self.rendered_snippets, snippet_name)
         if not maybe_parent:
             # This is a top-level snippet
             file_name = snippet.header.file
-            rendered_snippet = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None)
+            rendered_snippet = render_snippet(self.defined_snippets, snippet, CodeBlockFenceConfiguration.IncludeFence, None, maybe_url=command.url)
             #out += f"_Create `{file_name}`_\n"
             out += rendered_snippet.text
         else:
             #out += f"_Update `{maybe_parent.header.file}`_\n"
-            out += self.render_snippet_in_context_of_parent(snippet_name, maybe_parent)
+            out += self.render_snippet_in_context_of_parent(snippet_name, maybe_parent, maybe_root=maybe_root, maybe_url=command.url)
 
         return out
 
@@ -302,6 +306,7 @@ def render_snippet(
     fence_configuration: CodeBlockFenceConfiguration,
     highlight_snippet_idx: int | None,
     only_render_range: Tuple[StringIndex, StringIndex] | None = None,
+    maybe_root: InlineSnippet | None = None,
 ) -> RenderedSnippet:
     out = str()
     rules_to_start_idx = dict()
@@ -331,7 +336,7 @@ def render_snippet(
             case EmbedSnippet(inner_snippet_name):
                 if inner_snippet_name in defined_snippets:
                     inner_snippet = defined_snippets[inner_snippet_name]
-                    rendered_subsnippet = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None)
+                    rendered_subsnippet = render_snippet(defined_snippets, inner_snippet, CodeBlockFenceConfiguration.ExcludeFence, None, maybe_root=maybe_root)
                     out += rendered_subsnippet.text
                 else:
                     # TODO(PT): Track the implicitly defined snippets, and ensure they're defined later. Otherwise, it could be a typo.
@@ -352,9 +357,22 @@ def render_snippet(
         # trimmed_start = out[:only_render_range[0]]
         trimmed_start = out[:only_render_range[0]]
         highlight_lines_slide = trimmed_start.count("\n")
-        first_displayed_line_idx = trimmed_start.count("\n")
         highlight_start_line -= highlight_lines_slide
         highlight_end_line -= highlight_lines_slide
+
+        first_displayed_line_idx = trimmed_start.count("\n")
+
+        if maybe_root and snippet != maybe_root:
+            print(f'Adjusting line index due to root, first {first_displayed_line_idx}, snippet name {snippet.name}, root {maybe_root.name}')
+            rendered_root = render_snippet(
+                defined_snippets,
+                maybe_root,
+                fence_configuration,
+                None,
+                None,
+                None
+            )
+            first_displayed_line_idx = rendered_root.text.count("\n")
 
         out = out[only_render_range[0]:only_render_range[1]]
 
@@ -383,6 +401,7 @@ def render_snippet(
             out = f"{highlight_annotation}\n{out}"
             out += "\n{{</highlight>}}\n"
         else:
+            filename = snippet.header.file or maybe_root.header.file
             options = (
                 f"linenos=inline"
                 f"{highlight_lines_opt}"
@@ -392,7 +411,6 @@ def render_snippet(
                 f"{{{{<named-code-block lang=\"{snippet.header.lang.value}\" filename=\"{snippet.header.file}\" options=\"{options}\">}}}}"
             )
             out = f"{highlight_annotation}\n{out}\n{{{{</named-code-block>}}}}\n"
-            pass
         print(out)
 
     return RenderedSnippet(
