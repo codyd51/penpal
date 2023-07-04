@@ -48,6 +48,7 @@ class UpdateCommand:
 @dataclass
 class ShowCommand:
     snippet_name: str
+    url: str | None = None
 
 
 @dataclass
@@ -210,10 +211,12 @@ class MarkdownParser:
     def parse_command__show(self) -> ShowCommand:
         self.expect(TokenType.Space)
         snippet_name = self.expect(TokenType.Word)
+        self.expect(TokenType.Newline)
+        url = self.read_str_until(TokenType.Newline)
         self.match_command_close()
-        print(f"snippet name {snippet_name}")
+        print(f"snippet name {snippet_name} url {url}")
 
-        return ShowCommand(snippet_name=snippet_name.value)
+        return ShowCommand(snippet_name=snippet_name.value, url=url)
 
     def parse_command__execute(self) -> ExecuteProgram:
         self.match_command_close()

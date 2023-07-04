@@ -307,6 +307,7 @@ def render_snippet(
     highlight_snippet_idx: int | None,
     only_render_range: Tuple[StringIndex, StringIndex] | None = None,
     maybe_root: InlineSnippet | None = None,
+    maybe_url: str | None = None,
 ) -> RenderedSnippet:
     out = str()
     rules_to_start_idx = dict()
@@ -407,8 +408,11 @@ def render_snippet(
                 f"{highlight_lines_opt}"
                 f",linenostart={first_displayed_line_idx}"
             )
+            url = ""
+            if maybe_url:
+                url = f"url=\"{maybe_url}\""
             highlight_annotation = (
-                f"{{{{<named-code-block lang=\"{snippet.header.lang.value}\" filename=\"{snippet.header.file}\" options=\"{options}\">}}}}"
+                f"{{{{<named-code-block lang=\"{snippet.header.lang.value}\" filename=\"{filename}\" options=\"{options}\" {url}>}}}}"
             )
             out = f"{highlight_annotation}\n{out}\n{{{{</named-code-block>}}}}\n"
         print(out)
